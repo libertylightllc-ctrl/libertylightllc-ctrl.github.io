@@ -51,16 +51,16 @@ const baseExpiryTypes = [
 
 const rolePins = {
   "Platform Admin": "9999",
-  "Master Admin": "9999",
+  "Shop Admin": "9999",
   Owner: "1234",
   Cashier: "2222",
   Staff: "1111"
 };
 
 const roleAccess = {
-  "Platform Admin": ["master-admin", "dashboard", "setup", "quick-sale", "clients", "services", "purchases", "expenses", "inventory", "compliance", "cash", "accounting", "reports", "launch-audit", "settings"],
-  "Master Admin": ["dashboard", "setup", "quick-sale", "clients", "services", "purchases", "expenses", "inventory", "compliance", "cash", "accounting", "reports", "launch-audit", "settings"],
-  Owner: ["dashboard", "setup", "quick-sale", "clients", "services", "purchases", "expenses", "inventory", "compliance", "cash", "accounting", "reports", "launch-audit", "settings"],
+  "Platform Admin": ["master-admin", "dashboard", "setup", "quick-sale", "clients", "services", "purchases", "expenses", "inventory", "compliance", "cash", "accounting", "reports", "settings"],
+  "Shop Admin": ["dashboard", "setup", "quick-sale", "clients", "services", "purchases", "expenses", "inventory", "compliance", "cash", "accounting", "reports", "settings"],
+  Owner: ["dashboard", "setup", "quick-sale", "clients", "services", "purchases", "expenses", "inventory", "compliance", "cash", "accounting", "reports", "settings"],
   Cashier: ["dashboard", "quick-sale", "purchases", "expenses", "inventory", "cash", "reports"],
   Staff: ["quick-sale", "services"]
 };
@@ -273,7 +273,7 @@ const uiTranslations = {
   "Enter workspace": { ar: "دخول مساحة العمل", hi: "वर्कस्पेस खोलें", ur: "ورک اسپیس کھولیں" },
   "Owner opens the full control room. Staff opens fast sale entry.": { ar: "المالك يفتح التحكم الكامل. الموظف يفتح البيع السريع.", hi: "मालिक पूरा कंट्रोल खोलता है। स्टाफ तेज बिक्री एंट्री खोलता है।", ur: "مالک مکمل کنٹرول کھولتا ہے۔ اسٹاف فوری سیل انٹری کھولتا ہے۔" },
   Role: { ar: "الدور", hi: "भूमिका", ur: "کردار" },
-  "Master Admin": { ar: "المدير الرئيسي", hi: "मास्टर एडमिन", ur: "ماسٹر ایڈمن" },
+  "Shop Admin": { ar: "مدير المتجر", hi: "शॉप एडमिन", ur: "شاپ ایڈمن" },
   Owner: { ar: "المالك", hi: "मालिक", ur: "مالک" },
   Staff: { ar: "الموظف", hi: "स्टाफ", ur: "اسٹاف" },
   Cashier: { ar: "أمين الصندوق", hi: "कैशियर", ur: "کیشئر" },
@@ -734,11 +734,247 @@ let montajiItems = activeShopState.montajiItems || defaultState.montajiItems;
 let activeSaleCategory = "All";
 let currentRole = "Owner";
 let currentUser = { ...platformAccount };
+let cloudIdentity = null;
+let cloudSaveTimer = null;
+let cloudHydrating = false;
+const isLocalDemo = ["localhost", "127.0.0.1"].includes(window.location.hostname) && !new URLSearchParams(window.location.search).has("cloud");
+const backendRoleLabels = {
+  platform_admin: "Platform Admin",
+  owner: "Owner",
+  shop_admin: "Shop Admin",
+  cashier: "Cashier",
+  staff: "Staff"
+};
+const backendRoleValues = Object.fromEntries(Object.entries(backendRoleLabels).map(([key, value]) => [value, key]));
+
+if (!isLocalDemo) {
+  document.querySelector(".login-card .status-pill").textContent = "Secure cloud access";
+  document.querySelector(".login-card small").hidden = true;
+}
+
+function setSyncStatus(label, syncState = "") {
+  const status = document.getElementById("syncStatus");
+  if (!status) return;
+  status.hidden = !label;
+  status.textContent = label;
+  status.dataset.state = syncState;
+}
+
+const cloudCollections = [
+  ["services", "service"],
+  ["customers", "customer"],
+  ["appointments", "appointment"],
+  ["queueTickets", "queue_ticket"],
+  ["sales", "sale"],
+  ["purchases", "purchase"],
+  ["expenses", "expense"],
+  ["cashClosings", "cash_closing"],
+  ["staffPayments", "staff_payment"],
+  ["inspectionRecords", "inspection"],
+  ["hygieneLogs", "hygiene_log"],
+  ["complianceDocuments", "compliance_document"],
+  ["documentChain", "document_chain"],
+  ["montajiItems", "product_registration"]
+];
+
+const cloudWritableTypes = {
+  "Platform Admin": cloudCollections.map(([, type]) => type).concat("shop_setting"),
+  Owner: cloudCollections.map(([, type]) => type).concat("shop_setting"),
+  "Shop Admin": cloudCollections.map(([, type]) => type).concat("shop_setting"),
+  Cashier: ["customer", "appointment", "queue_ticket", "sale", "purchase", "expense", "cash_closing"],
+  Staff: ["queue_ticket", "sale"]
+};
+
+function cloudExternalId(item, type, index) {
+  if (item.id) return String(item.id);
+  const source = item.createdAt || item.name || item.record || item.type || item.sku || item.staff;
+  item.id = source
+    ? `${type}-${String(source).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}-${index}`
+    : `${type}-${crypto.randomUUID()}`;
+  return item.id;
+}
+
+function buildCloudRecords() {
+  const targetShopId = cloudTargetShopId();
+  if (!targetShopId) return [];
+  captureActiveShopState();
+  const allowed = new Set(cloudWritableTypes[currentRole] || []);
+  const records = [];
+  cloudCollections.forEach(([field, type]) => {
+    if (!allowed.has(type)) return;
+    (activeShopState[field] || []).forEach((item, index) => {
+      records.push({
+        shop_id: targetShopId,
+        record_type: type,
+        external_id: cloudExternalId(item, type, index),
+        data: item,
+        deleted_at: null
+      });
+    });
+  });
+  if (allowed.has("shop_setting")) {
+    records.push({
+      shop_id: targetShopId,
+      record_type: "shop_setting",
+      external_id: "operations",
+      data: { receiptEnabled, vatEnabled, openingCash, checklist },
+      deleted_at: null
+    });
+  }
+  return records;
+}
+
+function scheduleCloudSave() {
+  if (isLocalDemo || cloudHydrating || !cloudTargetShopId()) return;
+  clearTimeout(cloudSaveTimer);
+  setSyncStatus("Saving…", "saving");
+  cloudSaveTimer = setTimeout(async () => {
+    try {
+      await window.SalonBackend.upsertRecords(buildCloudRecords());
+      setSyncStatus("Saved", "connected");
+    } catch (error) {
+      console.error("Cloud save failed", error);
+      setSyncStatus("Save failed", "error");
+    }
+  }, 350);
+}
+
+async function deleteCloudRecord(item, type, index = 0) {
+  if (isLocalDemo) return true;
+  const shopId = cloudTargetShopId();
+  if (!shopId) return false;
+  const externalId = cloudExternalId(item, type, index);
+  setSyncStatus("Deleting…", "saving");
+  try {
+    await window.SalonBackend.softDeleteRecord(shopId, type, externalId);
+    setSyncStatus("Saved", "connected");
+    return true;
+  } catch (error) {
+    console.error("Cloud delete failed", error);
+    setSyncStatus("Delete failed", "error");
+    return false;
+  }
+}
+
+function cloudTargetShopId() {
+  if (cloudIdentity?.shop_id) return cloudIdentity.shop_id;
+  if (currentRole === "Platform Admin" && /^[0-9a-f-]{36}$/i.test(activeShopId || "")) return activeShopId;
+  return null;
+}
+
+async function loadCloudUsers(shopId) {
+  if (!shopId || isLocalDemo) return;
+  const result = await window.SalonBackend.loadUsers(shopId);
+  const target = shopStates[shopId] || createShopState({ customers: [], queueTickets: [] });
+  target.users = (result.users || []).map((user) => ({ ...user, role: backendRoleLabels[user.role] || user.role }));
+  shopStates[shopId] = target;
+}
+
+async function loadCloudShopState(shopId) {
+  const rows = await window.SalonBackend.loadRecords(shopId);
+  cloudHydrating = true;
+  try {
+    const target = shopStates[shopId] || createShopState({ customers: [], queueTickets: [] });
+    cloudCollections.forEach(([field, type]) => {
+      target[field] = rows.filter((row) => row.record_type === type).map((row) => row.data);
+    });
+    const settings = rows.find((row) => row.record_type === "shop_setting" && row.external_id === "operations")?.data;
+    if (settings) {
+      Object.assign(target, settings);
+      const shop = shops.find((candidate) => candidate.id === shopId);
+      if (shop) shop.location = settings.location || shop.location || "";
+    }
+    shopStates[shopId] = target;
+  } finally {
+    cloudHydrating = false;
+  }
+}
+
+async function prepareCloudIdentity(identity, username = "Account") {
+  const role = backendRoleLabels[identity.role];
+  if (!role) throw new Error("Account role is not supported");
+  cloudIdentity = identity;
+  if (identity.shop_id) {
+    let shop = shops.find((candidate) => candidate.id === identity.shop_id);
+    if (!shop) {
+      shop = {
+        id: identity.shop_id,
+        shopCode: identity.shop_code,
+        name: identity.shop_name,
+        location: "",
+        country: "AE",
+        currency: "AED",
+        enabled: true
+      };
+      shops.push(shop);
+      shopStates[shop.id] = createShopState({ customers: [], queueTickets: [] });
+    }
+    activeShopId = shop.id;
+    await loadCloudShopState(shop.id);
+    if (["Platform Admin", "Owner", "Shop Admin"].includes(role)) await loadCloudUsers(shop.id);
+  } else {
+    const remoteShops = await window.SalonBackend.loadShops();
+    shops = remoteShops.map((shop) => ({
+      id: shop.id,
+      shopCode: shop.code,
+      name: shop.name,
+      location: "",
+      country: shop.country,
+      currency: countryProfiles[shop.country]?.currency || "AED",
+      enabled: shop.status === "active",
+      status: shop.status
+    }));
+    activeShopId = shops[0]?.id || "";
+    if (activeShopId) await Promise.all([loadCloudShopState(activeShopId), loadCloudUsers(activeShopId)]);
+  }
+  return { ok: true, role, user: { name: username, username, role }, shopId: activeShopId };
+}
+
+async function authenticateCloudLogin({ shopCode, username, password }) {
+  const result = await window.SalonBackend.signIn(shopCode, username, password);
+  return prepareCloudIdentity(result.identity, username);
+}
+
+function enterAuthenticatedApp(login) {
+  if (isLocalDemo) captureActiveShopState();
+  activeShopId = login.shopId;
+  currentRole = login.role;
+  currentUser = login.user;
+  hydrateActiveShop();
+  removeLegacyDemoRows();
+  migrateServices();
+  window.scrollTo({ top: 0, left: 0 });
+  document.body.classList.add("is-authenticated");
+  const frontpage = document.getElementById("frontpage");
+  const appShell = document.getElementById("appShell");
+  frontpage.hidden = true;
+  appShell.hidden = false;
+  frontpage.classList.add("front-hidden");
+  appShell.classList.remove("app-hidden");
+  applyRoleAccess();
+  setSyncStatus(isLocalDemo ? "Local demo" : "Cloud connected", isLocalDemo ? "local" : "connected");
+  syncShopIdentity();
+  showView(currentRole === "Platform Admin" ? "master-admin" : currentRole === "Staff" ? "quick-sale" : "dashboard");
+}
+
+async function restoreCloudLogin() {
+  if (isLocalDemo) return;
+  try {
+    const restored = await window.SalonBackend.restore();
+    if (!restored?.identity) return;
+    const email = restored.session?.user?.email || "";
+    const username = email.split("@")[0].split(".").slice(1).join(".") || "Account";
+    const login = await prepareCloudIdentity(restored.identity, username);
+    enterAuthenticatedApp(login);
+  } catch (error) {
+    console.error("Session restore failed", error);
+  }
+}
 
 function defaultShopUsers(ownerName = "Owner", ownerUsername = "owner.albarsha", ownerPassword = "1234") {
   return [
     { name: ownerName, username: ownerUsername, password: ownerPassword, role: "Owner", active: true, createdAt: new Date().toISOString() },
-    { name: "Shop Master", username: "master.albarsha", password: "9999", role: "Master Admin", active: true, createdAt: new Date().toISOString() },
+    { name: "Shop Admin", username: "admin.albarsha", password: "9999", role: "Shop Admin", active: true, createdAt: new Date().toISOString() },
     { name: "Cashier", username: "cashier.albarsha", password: "2222", role: "Cashier", active: true, createdAt: new Date().toISOString() },
     { name: "Staff", username: "staff.albarsha", password: "1111", role: "Staff", active: true, createdAt: new Date().toISOString() }
   ];
@@ -787,7 +1023,7 @@ function captureActiveShopState() {
     auditLog,
     cashClosings,
     staffPayments,
-    users: activeShopState.users || defaultShopUsers(currentShop()?.owner || "Owner", currentShop()?.ownerUsername || "owner.albarsha"),
+    users: activeShopState.users || (isLocalDemo ? defaultShopUsers(currentShop()?.owner || "Owner", currentShop()?.ownerUsername || "owner.albarsha") : []),
     checklist,
     inspectionRecords,
     hygieneLogs,
@@ -809,15 +1045,15 @@ function hydrateActiveShop() {
   vatEnabled = !!activeShopState.vatEnabled;
   openingCash = Number(activeShopState.openingCash ?? defaultState.openingCash);
   sales = activeShopState.sales || [];
-  customers = activeShopState.customers?.length ? activeShopState.customers : clone(defaultState.customers);
-  queueTickets = activeShopState.queueTickets || clone(defaultState.queueTickets);
+  customers = Array.isArray(activeShopState.customers) ? activeShopState.customers : clone(defaultState.customers);
+  queueTickets = Array.isArray(activeShopState.queueTickets) ? activeShopState.queueTickets : clone(defaultState.queueTickets);
   appointments = activeShopState.appointments || [];
   auditLog = activeShopState.auditLog || [];
   cashClosings = activeShopState.cashClosings || [];
   staffPayments = activeShopState.staffPayments || clone(defaultState.staffPayments);
-  activeShopState.users = activeShopState.users?.length
+  activeShopState.users = Array.isArray(activeShopState.users)
     ? activeShopState.users
-    : defaultShopUsers(currentShop()?.owner || "Owner", currentShop()?.ownerUsername || "owner.albarsha");
+    : (isLocalDemo ? defaultShopUsers(currentShop()?.owner || "Owner", currentShop()?.ownerUsername || "owner.albarsha") : []);
   checklist = { ...defaultState.checklist, ...(activeShopState.checklist || {}) };
   inspectionRecords = activeShopState.inspectionRecords || clone(defaultState.inspectionRecords);
   hygieneLogs = activeShopState.hygieneLogs || [];
@@ -885,11 +1121,10 @@ function todayIso() {
   return new Date().toISOString().slice(0, 10);
 }
 
-function authenticateLogin({ shopCode, username, password, role }) {
+function authenticateLogin({ shopCode, username, password }) {
   const normalizedCode = shopCode.trim().toUpperCase();
   const normalizedUser = username.trim().toLowerCase();
   if (
-    role === platformAccount.role &&
     normalizedCode === platformAccount.shopCode &&
     normalizedUser === platformAccount.username &&
     password === platformAccount.password
@@ -904,21 +1139,9 @@ function authenticateLogin({ shopCode, username, password, role }) {
   shopState.users = shopState.users?.length
     ? shopState.users
     : defaultShopUsers(shop.owner || "Owner", shop.ownerUsername || "owner");
-  if (normalizedCode === "ALBARSHA001" && role === "Owner" && normalizedUser === "owner.albarsha" && password === "1234") {
-    let owner = shopState.users.find((candidate) => candidate.role === "Owner" && candidate.username.toLowerCase() === "owner.albarsha");
-    if (!owner) {
-      owner = { name: shop.owner || "Owner", username: "owner.albarsha", role: "Owner", active: true, createdAt: new Date().toISOString() };
-      shopState.users.unshift(owner);
-    }
-    owner.name = shop.owner || "Owner";
-    owner.username = "owner.albarsha";
-    owner.role = "Owner";
-    owner.password = "1234";
-    owner.active = true;
-  }
   const user = shopState.users.find((candidate) =>
     candidate.active !== false &&
-    candidate.role === role &&
+    Object.hasOwn(roleAccess, candidate.role) && candidate.role !== "Platform Admin" &&
     candidate.username.toLowerCase() === normalizedUser &&
     candidate.password === password
   );
@@ -938,24 +1161,7 @@ function migrateServices() {
 }
 
 function removeLegacyDemoRows() {
-  sales = sales.filter((sale) => !(sale.service === "Haircut" && sale.staff === "Rafiq" && Number(sale.amount) === 25 && !sale.discountReason));
-  purchases = purchases.filter((purchase) => ![
-    "Beauty Supply LLC|Blades, foam, tissues|420",
-    "Color House|Hair color, developer|220",
-    "Gulf Salon Tools|Clipper machine|250"
-  ].includes(`${purchase.supplier}|${purchase.item}|${purchase.unitCost}`));
-  expenses = expenses.filter((expense) => ![
-    "Tea & Food|35|Tea and water for staff",
-    "Dry Cleaning|85|Towels and capes",
-    "Transport|40|Supplier pickup"
-  ].includes(`${expense.category}|${expense.amount}|${expense.note}`));
-  auditLog = auditLog.filter((entry) => ![
-    "Rafiq · Haircut · Cash · AED 25",
-    "Owner · Blades · 100 pcs · AED 120",
-    "Owner · Tea & Food · AED 35 · Cash",
-    "Owner · Blades · -6 · reason required"
-  ].includes(entry.detail));
-  hygieneLogs = hygieneLogs.filter((log) => !["10 min heat cycle", "Surface wipe + towel change", "44 blades counted"].includes(log.cycle));
+  // Preserve records: matching old demo values does not prove a row is disposable.
   inspectionRecords = inspectionRecords.map((record, index) => ({
     ...record,
     dueDate: record.dueDate || defaultState.inspectionRecords[index]?.dueDate || isoOffset(0),
@@ -1009,6 +1215,7 @@ function saveState() {
   memoryState = nextState;
   try {
     localStorage.setItem(storageKey, JSON.stringify(nextState));
+    scheduleCloudSave();
     return true;
   } catch {
     return false;
@@ -1517,6 +1724,9 @@ function renderMasterDashboard() {
 
 function syncShopIdentity() {
   const shop = currentShop();
+  document.getElementById("userChip").textContent = currentRole === "Platform Admin"
+    ? "Platform Admin · Network"
+    : `${translate(currentRole)} · ${currentUser.name || currentUser.username || shop?.location || "Shop"}`;
   if (!shop) return;
   const profile = currentCountryProfile(shop);
   document.querySelectorAll(".branch-card strong").forEach((element) => {
@@ -1528,9 +1738,6 @@ function syncShopIdentity() {
   if (setupCountryLabel) setupCountryLabel.textContent = `${profile.name} · ${profile.currency} currency · ${vatEnabled ? "VAT on" : "VAT optional"}`;
   const reportSubtitle = document.querySelector(".report-header p");
   if (reportSubtitle) reportSubtitle.textContent = `${shop.name} · ${todayLabel()} · ${vatEnabled ? "VAT records" : "non-VAT internal records"}`;
-  document.getElementById("userChip").textContent = currentRole === "Platform Admin"
-    ? "Platform Admin · Network"
-    : `${translate(currentRole)} · ${currentUser.name || currentUser.username || shop.location}`;
   const countrySelect = document.getElementById("countrySelect");
   if (countrySelect) countrySelect.value = shop.country || currencyToCountry[shop.currency] || "AE";
   renderShopSwitcher();
@@ -1792,13 +1999,14 @@ function evidenceMarkup(record) {
   return escapeHtml(evidenceLabel(record));
 }
 
-function readEvidenceFile(inputId) {
+async function readEvidenceFile(inputId) {
   const input = document.getElementById(inputId);
   const file = input?.files?.[0];
-  if (!file) return Promise.resolve(null);
+  if (!file) return null;
   const allowed = file.type.startsWith("image/") || file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
   if (!allowed) return Promise.reject(new Error("Only PDF or image files can be uploaded."));
-  if (file.size > 2 * 1024 * 1024) return Promise.reject(new Error("Upload must be 2 MB or smaller in this MVP."));
+  if (file.size > 10 * 1024 * 1024) throw new Error("Upload must be 10 MB or smaller.");
+  if (!isLocalDemo) return window.SalonBackend.uploadEvidence(cloudTargetShopId(), file);
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onerror = () => reject(new Error("File upload could not be read."));
@@ -1961,8 +2169,10 @@ function renderExpiryDocuments() {
     });
 
   body.querySelectorAll("[data-delete-expiry]").forEach((button) => {
-    button.addEventListener("click", () => {
+    button.addEventListener("click", async () => {
       const index = Number(button.dataset.deleteExpiry);
+      if (!window.confirm("Delete this expiry record? The audit history will be retained.")) return;
+      if (!await deleteCloudRecord(complianceDocuments[index], "compliance_document", index)) return;
       const removed = complianceDocuments.splice(index, 1)[0];
       addAudit("Stock adjusted", `${currentRole} · expiry deleted · ${removed?.type || "document"}`);
       saveState();
@@ -2311,10 +2521,21 @@ function applyRoleAccess() {
   renderMobileViewSwitcher();
 }
 
-function switchShop(shopId) {
+async function switchShop(shopId) {
   if (!shops.some((shop) => shop.id === shopId && shop.enabled !== false)) return;
   captureActiveShopState();
   activeShopId = shopId;
+  if (!isLocalDemo) {
+    setSyncStatus("Loading…", "saving");
+    try {
+      await Promise.all([loadCloudShopState(shopId), loadCloudUsers(shopId)]);
+      setSyncStatus("Cloud connected", "connected");
+    } catch (error) {
+      console.error("Cloud shop load failed", error);
+      setSyncStatus("Load failed", "error");
+      return;
+    }
+  }
   hydrateActiveShop();
   removeLegacyDemoRows();
   migrateServices();
@@ -2334,13 +2555,14 @@ function switchShop(shopId) {
   saveState();
 }
 
-function createShopFromForm() {
+async function createShopFromForm() {
   const name = document.getElementById("newShopName").value.trim();
   const requestedCode = document.getElementById("newShopCode").value.trim().toUpperCase();
+  const shopCode = requestedCode || (isLocalDemo ? shopCodeFromName(name) : "");
   const location = document.getElementById("newShopLocation").value.trim() || "New branch";
   const owner = document.getElementById("newShopOwner").value.trim() || "Owner";
-  const ownerUsername = document.getElementById("newOwnerUsername").value.trim() || uniqueUsername(`${owner}.${name}`);
-  const ownerPassword = document.getElementById("newOwnerPassword").value.trim() || "ChangeMe123";
+  const ownerUsername = document.getElementById("newOwnerUsername").value.trim() || (isLocalDemo ? uniqueUsername(`${owner}.${name}`) : "");
+  const ownerPassword = document.getElementById("newOwnerPassword").value;
   const opening = Number(document.getElementById("newShopOpeningCash").value || 0);
   const language = document.getElementById("newShopLanguage").value;
   const country = document.getElementById("newShopCountry").value || "AE";
@@ -2348,27 +2570,53 @@ function createShopFromForm() {
   const vat = document.getElementById("newShopVat").value === "on";
   const note = document.getElementById("masterNote");
 
-  if (!name) {
-    note.textContent = "Shop name is required.";
+  if (!name || !shopCode || !ownerUsername || !ownerPassword) {
+    note.textContent = "Shop name, Shop ID, owner username and password are required.";
     document.getElementById("newShopName").focus();
+    return;
+  }
+  if (ownerPassword.length < 10) {
+    note.textContent = "Owner password must be at least 10 characters.";
+    document.getElementById("newOwnerPassword").focus();
     return;
   }
 
   captureActiveShopState();
-  const id = slugify(name);
-  const shopCode = requestedCode || shopCodeFromName(name);
   if (shops.some((shop) => (shop.shopCode || "").toUpperCase() === shopCode)) {
     note.textContent = "Shop ID already exists. Use a unique shop ID.";
     document.getElementById("newShopCode").focus();
     return;
   }
-  shops.push({ id, shopCode, name, location, country, owner, ownerUsername, currency: profile.currency, enabled: true });
+  let id = slugify(name);
+  let ownerUserId = null;
+  if (!isLocalDemo) {
+    const button = document.getElementById("createShopBtn");
+    button.disabled = true;
+    note.textContent = "Creating secure shop and owner account…";
+    try {
+      const result = await window.SalonBackend.provision({
+        action: "create_shop", shopCode, shopName: name, location, country,
+        username: ownerUsername, password: ownerPassword, ownerName: owner,
+        openingCash: opening, language, vatEnabled: vat
+      });
+      id = result.shop.id;
+      ownerUserId = result.userId;
+    } catch (error) {
+      note.textContent = error instanceof Error ? error.message : "Shop could not be created.";
+      button.disabled = false;
+      return;
+    }
+    button.disabled = false;
+  }
+  shops.push({ id, shopCode, name, location, country, owner, ownerUsername, currency: profile.currency, enabled: true, status: "active" });
   shopStates[id] = createShopState({
     openingCash: opening,
     vatEnabled: vat,
     receiptEnabled: false,
     complianceDocuments: defaultComplianceDocuments(country),
-    users: defaultShopUsers(owner, ownerUsername, ownerPassword)
+    users: isLocalDemo
+      ? defaultShopUsers(owner, ownerUsername, ownerPassword)
+      : [{ id: ownerUserId, name: owner, username: ownerUsername, role: "Owner", active: true, createdAt: new Date().toISOString() }]
   });
   activeShopId = id;
   activeLanguage = language;
@@ -2399,22 +2647,38 @@ function createShopFromForm() {
   syncTaxSettings();
   updatePurchaseCalculation();
   saveState();
-  showView("dashboard");
+  showView(currentRole === "Platform Admin" ? "master-admin" : "dashboard");
 }
 
 function generatedPassword(prefix = "Temp") {
-  return `${prefix}${Math.floor(1000 + Math.random() * 9000)}`;
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%";
+  const bytes = crypto.getRandomValues(new Uint8Array(14));
+  return `${prefix.slice(0, 3)}!${Array.from(bytes, (byte) => alphabet[byte % alphabet.length]).join("")}`;
 }
 
-function resetOwnerPassword(shopId) {
+async function resetOwnerPassword(shopId) {
   const shop = shops.find((candidate) => candidate.id === shopId);
   if (!shop) return;
   const shopState = shopStates[shopId] || createShopState();
   shopStates[shopId] = shopState;
-  shopState.users = shopState.users?.length ? shopState.users : defaultShopUsers(shop.owner || "Owner", shop.ownerUsername || "owner");
+  shopState.users = shopState.users?.length
+    ? shopState.users
+    : (isLocalDemo ? defaultShopUsers(shop.owner || "Owner", shop.ownerUsername || "owner") : []);
   const owner = shopState.users.find((user) => user.role === "Owner") || shopState.users[0];
   const password = generatedPassword("Owner");
-  owner.password = password;
+  if (!isLocalDemo) {
+    if (!owner?.id) {
+      document.getElementById("masterNote").textContent = "Owner account could not be identified.";
+      return;
+    }
+    try {
+      await window.SalonBackend.provision({ action: "reset_password", shopId, userId: owner.id, password });
+    } catch (error) {
+      document.getElementById("masterNote").textContent = error instanceof Error ? error.message : "Password reset failed.";
+      return;
+    }
+  }
+  if (isLocalDemo) owner.password = password;
   owner.active = true;
   shop.ownerUsername = owner.username;
   document.getElementById("handoverCard").hidden = false;
@@ -2426,14 +2690,24 @@ function resetOwnerPassword(shopId) {
   renderMasterDashboard();
 }
 
-function toggleShopStatus(shopId) {
+async function toggleShopStatus(shopId) {
   const shop = shops.find((candidate) => candidate.id === shopId);
   if (!shop) return;
   if (shop.id === activeShopId && shop.enabled !== false && shops.filter((candidate) => candidate.enabled !== false && candidate.id !== shopId).length === 0) {
     document.getElementById("masterNote").textContent = "At least one active shop is required.";
     return;
   }
-  shop.enabled = shop.enabled === false;
+  const nextEnabled = shop.enabled === false;
+  if (!isLocalDemo) {
+    try {
+      await window.SalonBackend.provision({ action: "set_shop_status", shopId, status: nextEnabled ? "active" : "suspended" });
+    } catch (error) {
+      document.getElementById("masterNote").textContent = error instanceof Error ? error.message : "Shop status could not be changed.";
+      return;
+    }
+  }
+  shop.enabled = nextEnabled;
+  shop.status = nextEnabled ? "active" : "suspended";
   if (shop.enabled === false && shop.id === activeShopId) {
     const next = shops.find((candidate) => candidate.enabled !== false && candidate.id !== shopId);
     if (next) switchShop(next.id);
@@ -2444,22 +2718,30 @@ function toggleShopStatus(shopId) {
   renderMasterDashboard();
 }
 
-function deleteShop(shopId) {
+async function deleteShop(shopId) {
   const shop = shops.find((candidate) => candidate.id === shopId);
   if (!shop) return;
   if (shops.filter((candidate) => candidate.enabled !== false && candidate.id !== shopId && candidate.deleted !== true).length === 0) {
     document.getElementById("masterNote").textContent = "Cannot delete the last active shop.";
     return;
   }
-  if (!window.confirm(`Delete ${shop.name}? This removes its local records in this MVP.`)) return;
+  if (!window.confirm(`Archive ${shop.name}? Its records will be retained and access will be disabled.`)) return;
+  if (!isLocalDemo) {
+    try {
+      await window.SalonBackend.provision({ action: "set_shop_status", shopId, status: "archived" });
+    } catch (error) {
+      document.getElementById("masterNote").textContent = error instanceof Error ? error.message : "Shop could not be archived.";
+      return;
+    }
+  }
   shops = shops.filter((candidate) => candidate.id !== shopId);
   delete shopStates[shopId];
   if (activeShopId === shopId) {
     activeShopId = shops.find((candidate) => candidate.enabled !== false)?.id || shops[0]?.id;
     hydrateActiveShop();
   }
-  document.getElementById("masterNote").textContent = `${shop.name} deleted.`;
-  addAudit("Stock adjusted", `${currentRole} · deleted shop · ${shop.shopCode}`);
+  document.getElementById("masterNote").textContent = `${shop.name} archived. Records were retained.`;
+  addAudit("Stock adjusted", `${currentRole} · archived shop · ${shop.shopCode}`);
   saveState();
   syncSummaryTotals();
   renderMasterDashboard();
@@ -2468,9 +2750,9 @@ function deleteShop(shopId) {
 function renderUserManagement() {
   const table = document.getElementById("userTable");
   if (!table || !activeShopState) return;
-  activeShopState.users = activeShopState.users?.length
+  activeShopState.users = Array.isArray(activeShopState.users)
     ? activeShopState.users
-    : defaultShopUsers(currentShop()?.owner || "Owner", currentShop()?.ownerUsername || "owner.albarsha");
+    : (isLocalDemo ? defaultShopUsers(currentShop()?.owner || "Owner", currentShop()?.ownerUsername || "owner.albarsha") : []);
   table.innerHTML = "";
   activeShopState.users.forEach((user, index) => {
     const row = document.createElement("tr");
@@ -2483,7 +2765,7 @@ function renderUserManagement() {
         <div class="action-cluster">
           <button class="mini-action" data-reset-user="${index}" type="button">Reset</button>
           <button class="mini-action" data-toggle-user="${index}" type="button">${user.active === false ? "Enable" : "Disable"}</button>
-          <button class="danger-button" data-delete-user="${index}" type="button">Delete</button>
+          <button class="danger-button" data-delete-user="${index}" type="button">Archive</button>
         </div>
       </td>
     `;
@@ -2491,11 +2773,19 @@ function renderUserManagement() {
   });
 
   table.querySelectorAll("[data-reset-user]").forEach((button) => {
-    button.addEventListener("click", () => {
-      if (!["Owner", "Master Admin", "Platform Admin"].includes(currentRole)) return;
+    button.addEventListener("click", async () => {
+      if (!["Owner", "Shop Admin", "Platform Admin"].includes(currentRole)) return;
       const user = activeShopState.users[Number(button.dataset.resetUser)];
       if (!user) return;
       const password = generatedPassword(user.role === "Owner" ? "Owner" : "User");
+      if (!isLocalDemo) {
+        try {
+          await window.SalonBackend.provision({ action: "reset_password", shopId: cloudTargetShopId(), userId: user.id, password });
+        } catch (error) {
+          document.getElementById("userAccessNote").textContent = error instanceof Error ? error.message : "Password reset failed.";
+          return;
+        }
+      }
       user.password = password;
       user.active = true;
       document.getElementById("userAccessNote").textContent = `${user.name} password reset. Shop ID ${currentShopCode()}, username ${user.username}, password ${password}.`;
@@ -2506,14 +2796,23 @@ function renderUserManagement() {
   });
 
   table.querySelectorAll("[data-toggle-user]").forEach((button) => {
-    button.addEventListener("click", () => {
-      if (!["Owner", "Master Admin", "Platform Admin"].includes(currentRole)) return;
+    button.addEventListener("click", async () => {
+      if (!["Owner", "Shop Admin", "Platform Admin"].includes(currentRole)) return;
       const user = activeShopState.users[Number(button.dataset.toggleUser)];
       if (!user || user.role === "Owner") {
         document.getElementById("userAccessNote").textContent = "Owner login cannot be disabled from this screen.";
         return;
       }
-      user.active = user.active === false;
+      const nextActive = user.active === false;
+      if (!isLocalDemo) {
+        try {
+          await window.SalonBackend.provision({ action: "set_user_status", shopId: cloudTargetShopId(), userId: user.id, active: nextActive });
+        } catch (error) {
+          document.getElementById("userAccessNote").textContent = error instanceof Error ? error.message : "Account status could not be changed.";
+          return;
+        }
+      }
+      user.active = nextActive;
       addAudit("Stock adjusted", `${currentRole} · ${user.active ? "enabled" : "disabled"} user · ${user.username}`);
       saveState();
       renderUserManagement();
@@ -2521,29 +2820,37 @@ function renderUserManagement() {
   });
 
   table.querySelectorAll("[data-delete-user]").forEach((button) => {
-    button.addEventListener("click", () => {
-      if (!["Owner", "Master Admin", "Platform Admin"].includes(currentRole)) return;
+    button.addEventListener("click", async () => {
+      if (!["Owner", "Shop Admin", "Platform Admin"].includes(currentRole)) return;
       const index = Number(button.dataset.deleteUser);
       const user = activeShopState.users[index];
       if (!user || user.role === "Owner") {
         document.getElementById("userAccessNote").textContent = "Owner login cannot be deleted from this screen.";
         return;
       }
-      if (!window.confirm(`Delete login for ${user.name}?`)) return;
-      activeShopState.users.splice(index, 1);
-      document.getElementById("userAccessNote").textContent = `${user.name} deleted.`;
-      addAudit("Stock adjusted", `${currentRole} · deleted ${user.role} login · ${user.username}`);
+      if (!window.confirm(`Archive login for ${user.name}? Access will be disabled and the audit history retained.`)) return;
+      if (!isLocalDemo) {
+        try {
+          await window.SalonBackend.provision({ action: "set_user_status", shopId: cloudTargetShopId(), userId: user.id, active: false });
+        } catch (error) {
+          document.getElementById("userAccessNote").textContent = error instanceof Error ? error.message : "Account could not be archived.";
+          return;
+        }
+      }
+      user.active = false;
+      document.getElementById("userAccessNote").textContent = `${user.name} archived.`;
+      addAudit("Stock adjusted", `${currentRole} · archived ${user.role} login · ${user.username}`);
       saveState();
       renderUserManagement();
     });
   });
 }
 
-function createUserFromForm() {
-  if (!["Owner", "Master Admin", "Platform Admin"].includes(currentRole)) return;
+async function createUserFromForm() {
+  if (!["Owner", "Shop Admin", "Platform Admin"].includes(currentRole)) return;
   const name = document.getElementById("newUserName").value.trim();
   const username = document.getElementById("newUserUsername").value.trim();
-  const password = document.getElementById("newUserPassword").value.trim();
+  const password = document.getElementById("newUserPassword").value;
   const role = document.getElementById("newUserRole").value;
   const note = document.getElementById("userAccessNote");
   activeShopState.users = activeShopState.users || [];
@@ -2552,12 +2859,31 @@ function createUserFromForm() {
     note.textContent = "Name, username and password are required.";
     return;
   }
+  if (password.length < 10) {
+    note.textContent = "Password must be at least 10 characters.";
+    return;
+  }
   if (activeShopState.users.some((user) => user.username.toLowerCase() === username.toLowerCase())) {
     note.textContent = "Username already exists in this shop.";
     return;
   }
 
-  activeShopState.users.push({ name, username, password, role, active: true, createdAt: new Date().toISOString() });
+  let userId = null;
+  if (!isLocalDemo) {
+    const button = document.getElementById("createUserBtn");
+    button.disabled = true;
+    note.textContent = "Creating secure account…";
+    try {
+      const result = await window.SalonBackend.provision({ action: "create_user", shopId: cloudTargetShopId(), name, username, password, role: backendRoleValues[role] });
+      userId = result.userId;
+    } catch (error) {
+      note.textContent = error instanceof Error ? error.message : "User could not be created.";
+      button.disabled = false;
+      return;
+    }
+    button.disabled = false;
+  }
+  activeShopState.users.push({ id: userId, name, username, ...(isLocalDemo ? { password } : {}), role, active: true, createdAt: new Date().toISOString() });
   note.textContent = `${name} created. Login with Shop ID ${currentShopCode()}, username ${username} and the assigned password.`;
   document.getElementById("newUserName").value = "";
   document.getElementById("newUserUsername").value = "";
@@ -2646,10 +2972,11 @@ function renderServiceTable() {
   });
 
   body.querySelectorAll("[data-delete-service]").forEach((button) => {
-    button.addEventListener("click", (event) => {
+    button.addEventListener("click", async (event) => {
       event.stopPropagation();
       const index = Number(button.dataset.deleteService);
       if (!window.confirm("Delete this service? This action will be recorded in the audit trail.")) return;
+      if (!await deleteCloudRecord(services[index], "service", index)) return;
       addAudit("Stock adjusted", `${currentRole} · service deleted · ${services[index]?.name || "service"}`);
       services.splice(index, 1);
       selectedService = services[0] || { name: "No service", price: 0, active: false };
@@ -2678,10 +3005,11 @@ function renderPurchaseTable() {
   });
 
   body.querySelectorAll("[data-delete-purchase]").forEach((button) => {
-    button.addEventListener("click", () => {
+    button.addEventListener("click", async () => {
       const index = Number(button.dataset.deletePurchase);
       const purchase = purchases[index];
       if (!window.confirm("Delete this purchase? Expected cash will be recalculated.")) return;
+      if (!await deleteCloudRecord(purchase, "purchase", index)) return;
       purchases.splice(index, 1);
       addAudit("Purchase entered", `${currentRole} · purchase deleted · ${purchase?.item || "purchase"} · ${moneyFixed(purchaseTotal(purchase || {}))}`);
       saveState();
@@ -2743,7 +3071,7 @@ function renderCustomerTable() {
     body.appendChild(row);
   });
   body.querySelectorAll("[data-select-customer]").forEach((button) => {
-    button.addEventListener("click", () => {
+    button.addEventListener("click", async () => {
       document.getElementById("saleCustomer").value = button.dataset.selectCustomer;
       showView("quick-sale");
     });
@@ -2897,10 +3225,11 @@ function renderExpenseTable() {
   });
 
   body.querySelectorAll("[data-delete-expense]").forEach((button) => {
-    button.addEventListener("click", () => {
+    button.addEventListener("click", async () => {
       const index = Number(button.dataset.deleteExpense);
       const expense = expenses[index];
       if (!window.confirm("Delete this expense? Expected cash will be recalculated.")) return;
+      if (!await deleteCloudRecord(expense, "expense", index)) return;
       expenses.splice(index, 1);
       addAudit("Expense entered", `${currentRole} · expense deleted · ${expense?.category || "expense"} · ${moneyFixed(Number(expense?.amount) || 0)}`);
       saveState();
@@ -3013,21 +3342,6 @@ document.querySelectorAll(".language-switch button").forEach((button) => {
   });
 });
 
-document.getElementById("loginRole").addEventListener("change", (event) => {
-  const role = event.target.value;
-  const demoByRole = {
-    "Platform Admin": ["PLATFORM", "admin", "9999"],
-    Owner: ["ALBARSHA001", "owner.albarsha", "1234"],
-    "Master Admin": ["ALBARSHA001", "master.albarsha", "9999"],
-    Cashier: ["ALBARSHA001", "cashier.albarsha", "2222"],
-    Staff: ["ALBARSHA001", "staff.albarsha", "1111"]
-  };
-  const [shopCode, username, password] = demoByRole[role] || demoByRole.Owner;
-  document.getElementById("loginShopId").value = shopCode;
-  document.getElementById("loginUsername").value = username;
-  document.getElementById("loginPin").value = password;
-});
-
 document.querySelectorAll("[data-category]").forEach((button) => {
   button.addEventListener("click", () => {
     activeSaleCategory = button.dataset.category;
@@ -3079,40 +3393,38 @@ document.getElementById("saveSettings").addEventListener("click", () => {
   saveState();
 });
 
-document.getElementById("loginForm").addEventListener("submit", (event) => {
+document.getElementById("loginForm").addEventListener("submit", async (event) => {
   event.preventDefault();
-  const role = document.getElementById("loginRole").value;
   const shopCode = document.getElementById("loginShopId").value;
   const username = document.getElementById("loginUsername").value;
-  const password = document.getElementById("loginPin").value.trim();
+  const password = document.getElementById("loginPin").value;
   const loginError = document.getElementById("loginError");
-  const login = authenticateLogin({ shopCode, username, password, role });
+  const submit = event.submitter || document.querySelector(".login-submit");
+  submit.disabled = true;
+  loginError.hidden = true;
+  let login;
+  try {
+    login = isLocalDemo
+      ? authenticateLogin({ shopCode, username, password })
+      : await authenticateCloudLogin({ shopCode, username, password });
+  } catch (error) {
+    loginError.textContent = error instanceof Error ? error.message : "Unable to sign in.";
+    login = { ok: false };
+  } finally {
+    submit.disabled = false;
+  }
   if (!login.ok) {
     loginError.hidden = false;
     return;
   }
   loginError.hidden = true;
-  captureActiveShopState();
-  activeShopId = login.shopId;
-  currentRole = login.role;
-  currentUser = login.user;
-  hydrateActiveShop();
-  removeLegacyDemoRows();
-  migrateServices();
-  window.scrollTo({ top: 0, left: 0 });
-  document.body.classList.add("is-authenticated");
-  const frontpage = document.getElementById("frontpage");
-  const appShell = document.getElementById("appShell");
-  frontpage.hidden = true;
-  appShell.hidden = false;
-  frontpage.classList.add("front-hidden");
-  appShell.classList.remove("app-hidden");
-  applyRoleAccess();
-  syncShopIdentity();
-  showView(currentRole === "Platform Admin" ? "master-admin" : currentRole === "Staff" ? "quick-sale" : "dashboard");
+  enterAuthenticatedApp(login);
 });
 
 document.getElementById("logoutBtn").addEventListener("click", () => {
+  if (!isLocalDemo) void window.SalonBackend.signOut();
+  cloudIdentity = null;
+  setSyncStatus("");
   window.scrollTo({ top: 0, left: 0 });
   document.body.classList.remove("is-authenticated");
   document.body.classList.remove("is-platform-admin");
@@ -3131,9 +3443,9 @@ document.getElementById("printReport").addEventListener("click", () => {
 
 document.getElementById("savePurchase").addEventListener("click", () => {
   const purchase = {
-    supplier: document.getElementById("purchaseSupplier").value.trim() || "Unknown supplier",
+    supplier: document.getElementById("purchaseSupplier").value.trim(),
     type: document.getElementById("purchaseType").value,
-    item: document.getElementById("purchaseItem").value.trim() || "Unnamed item",
+    item: document.getElementById("purchaseItem").value.trim(),
     qty: Number(document.getElementById("purchaseQty").value || 0),
     unit: document.getElementById("purchaseUnit").value.trim() || "unit",
     unitCost: Number(document.getElementById("purchaseUnitCost").value || 0),
@@ -3141,7 +3453,7 @@ document.getElementById("savePurchase").addEventListener("click", () => {
     payment: document.getElementById("purchasePayment").value,
     createdAt: new Date().toISOString()
   };
-  if (!purchase.item || purchase.qty < 0 || purchase.unitCost < 0 || purchase.discount < 0) {
+  if (!purchase.supplier || !purchase.item || ![purchase.qty, purchase.unitCost, purchase.discount].every(Number.isFinite) || purchase.qty <= 0 || purchase.unitCost < 0 || purchase.discount < 0 || purchase.discount > purchase.qty * purchase.unitCost) {
     document.getElementById("purchaseNote").textContent = "Enter a valid item, quantity, unit cost and discount.";
     return;
   }
@@ -3236,6 +3548,13 @@ document.getElementById("saveExpiryDocument").addEventListener("click", async ()
   }
   try {
     evidenceFile = await readEvidenceFile("expiryEvidenceFile");
+    if (evidenceFile?.storagePath) {
+      await window.SalonBackend.saveDocumentMetadata({
+        shop_id: cloudTargetShopId(), title: `${type} · ${holder}`, category: type,
+        issue_date: issueDate || null, expiry_date: expiryDate, reminder_days: reminderDays,
+        object_path: evidenceFile.storagePath
+      });
+    }
   } catch (error) {
     note.textContent = error.message;
     return;
@@ -3269,15 +3588,23 @@ document.getElementById("addHygieneLog").addEventListener("click", async () => {
   const solution = document.getElementById("hygieneSolution").value.trim();
   const singleUse = document.getElementById("hygieneSingleUse").value.trim();
   const evidence = document.getElementById("hygieneEvidence").value.trim();
+  const selectedFile = document.getElementById("hygieneEvidenceFile")?.files?.[0];
   let evidenceFile = null;
-  try {
-    evidenceFile = await readEvidenceFile("hygieneEvidenceFile");
-  } catch (error) {
-    document.getElementById("hygieneNote").textContent = error.message;
+  if (!device || !cycle || (!evidence && !selectedFile)) {
+    document.getElementById("hygieneNote").textContent = translate("Enter device, cycle and evidence before saving.");
     return;
   }
-  if (!device || !cycle || (!evidence && !evidenceFile)) {
-    document.getElementById("hygieneNote").textContent = translate("Enter device, cycle and evidence before saving.");
+  try {
+    evidenceFile = await readEvidenceFile("hygieneEvidenceFile");
+    if (evidenceFile?.storagePath) {
+      await window.SalonBackend.saveDocumentMetadata({
+        shop_id: cloudTargetShopId(), title: `Hygiene evidence · ${device || "record"}`,
+        category: "Hygiene", issue_date: todayIso(), expiry_date: null,
+        reminder_days: 0, object_path: evidenceFile.storagePath
+      });
+    }
+  } catch (error) {
+    document.getElementById("hygieneNote").textContent = error.message;
     return;
   }
   hygieneLogs.unshift({
@@ -3360,3 +3687,4 @@ syncTaxSettings();
 syncReportTotals();
 syncSummaryTotals();
 updatePurchaseCalculation();
+void restoreCloudLogin();

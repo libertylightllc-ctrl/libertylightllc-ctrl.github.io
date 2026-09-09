@@ -8,7 +8,7 @@
       content="Salon Control is a publishable barber shop daily-control web app for sales, purchases, expenses, stock, tools, cash closing and reports."
     />
     <meta name="theme-color" content="#17362f" />
-    <title>Salon Control MVP</title>
+    <title>Salon Control</title>
     <link rel="icon" href="./assets/icon.svg" type="image/svg+xml" />
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -17,7 +17,7 @@
       rel="stylesheet"
       href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=IBM+Plex+Sans+Devanagari:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap"
     />
-    <link rel="stylesheet" href="./styles.css?v=20260908-clients-queue-2" />
+    <link rel="stylesheet" href="./styles.css?v=20260910-release-1" />
   </head>
   <body>
     <noscript>Salon Control needs JavaScript enabled to run the app.</noscript>
@@ -46,7 +46,7 @@
             </div>
             <div>
               <strong>5 roles</strong>
-              <span>platform, owner, master, cashier, staff</span>
+              <span>platform, owner, shop admin, cashier, staff</span>
             </div>
             <div>
               <strong id="loginCurrencySignal">AED</strong>
@@ -58,28 +58,18 @@
         <section class="login-access-panel">
           <a class="login-back-link" href="./">Product site</a>
           <form class="login-card" id="loginForm">
-            <span class="status-pill">Secure demo access</span>
+            <span class="status-pill">Demo access</span>
             <h2>Login</h2>
-            <p>Use the shop ID, username and password issued for your role.</p>
             <label>Shop ID
-              <input id="loginShopId" value="PLATFORM" autocomplete="organization" />
+              <input id="loginShopId" autocomplete="organization" required />
             </label>
             <label>Username
-              <input id="loginUsername" value="admin" autocomplete="username" />
-            </label>
-            <label>Role
-              <select id="loginRole">
-                <option value="Platform Admin">Platform Admin</option>
-                <option value="Owner">Owner</option>
-                <option value="Master Admin">Master Admin</option>
-                <option value="Cashier">Cashier</option>
-                <option value="Staff">Staff</option>
-              </select>
+              <input id="loginUsername" autocomplete="username" required />
             </label>
             <label>Password
-              <input id="loginPin" value="9999" type="password" autocomplete="current-password" />
+              <input id="loginPin" type="password" autocomplete="current-password" required />
             </label>
-            <p class="system-note danger-note" id="loginError" hidden>Wrong shop ID, username, password or role.</p>
+            <p class="system-note danger-note" id="loginError" role="alert" hidden>Unable to sign in. Check your shop ID, username and password.</p>
             <button class="primary-button full login-submit" type="submit">Enter Salon Control</button>
             <small>Demo platform: Shop ID PLATFORM · username admin · password 9999</small>
           </form>
@@ -160,10 +150,6 @@
             <span class="nav-icon" data-icon="report"></span>
             Reports
           </button>
-          <button class="nav-item" data-view="launch-audit" type="button">
-            <span class="nav-icon" data-icon="report"></span>
-            Launch Audit
-          </button>
           <button class="nav-item" data-view="settings" type="button">
             <span class="nav-icon" data-icon="settings"></span>
             Settings
@@ -192,6 +178,7 @@
               <select class="mobile-module-switcher" id="mobileViewSwitcher" aria-label="Choose module"></select>
             </label>
             <span class="user-chip" id="userChip">Owner · Al Barsha</span>
+            <span class="sync-status" id="syncStatus" hidden>Cloud</span>
             <select class="shop-switcher shop-only-control" id="shopSwitcher" aria-label="Active shop"></select>
             <div class="language-switch shop-only-control" aria-label="Language preview">
               <button class="active" data-lang="en" type="button">EN</button>
@@ -256,7 +243,7 @@
                 </label>
                 <label>Owner name <input id="newShopOwner" placeholder="Owner name" /></label>
                 <label>Owner username <input id="newOwnerUsername" placeholder="owner.albarsha" /></label>
-                <label>Temporary password <input id="newOwnerPassword" placeholder="ChangeMe123" /></label>
+                <label>Temporary password <input id="newOwnerPassword" type="password" minlength="10" autocomplete="new-password" placeholder="Minimum 10 characters" /></label>
                 <label>Opening cash <input id="newShopOpeningCash" type="number" min="0" step="0.01" value="200" /></label>
                 <label>Default language
                   <select id="newShopLanguage">
@@ -1136,64 +1123,6 @@
           </div>
         </section>
 
-        <section class="view" id="launch-audit">
-          <div class="metric-grid">
-            <article class="metric-card highlight">
-              <span>Market readiness</span>
-              <strong id="auditReadinessScore">0%</strong>
-              <small>Weighted launch controls completed</small>
-            </article>
-            <article class="metric-card">
-              <span>Working MVP modules</span>
-              <strong id="auditWorkingCount">0</strong>
-              <small>Browser-visible and saveable now</small>
-            </article>
-            <article class="metric-card">
-              <span>Backend gaps</span>
-              <strong id="auditBackendCount">0</strong>
-              <small>Must move from browser storage to server</small>
-            </article>
-            <article class="metric-card">
-              <span>Next sprint</span>
-              <strong id="auditNextSprintCount">0</strong>
-              <small>Highest-priority build items</small>
-            </article>
-          </div>
-
-          <div class="audit-layout">
-            <article class="panel launch-readiness-panel">
-              <div class="panel-head">
-                <div>
-                  <h3>Launch Readiness Checklist</h3>
-                  <p>Pre-market audit for onboarding real barber shops</p>
-                </div>
-                <button class="primary-button" id="runLaunchAudit" type="button">Run Audit</button>
-              </div>
-              <div class="launch-audit-list" id="launchAuditList"></div>
-            </article>
-
-            <aside class="panel launch-priority-panel">
-              <div class="panel-head compact">
-                <div>
-                  <h3>Build Order</h3>
-                  <p>Move one checked item at a time into the product</p>
-                </div>
-              </div>
-              <div class="priority-stack" id="launchPriorityStack"></div>
-            </aside>
-          </div>
-
-          <article class="panel launch-gap-panel">
-            <div class="panel-head">
-              <div>
-                <h3>Production Requirements</h3>
-                <p>What must exist before active users trust the platform</p>
-              </div>
-            </div>
-            <div class="requirement-grid" id="productionRequirementGrid"></div>
-          </article>
-        </section>
-
         <section class="view" id="settings">
           <div class="split-layout">
             <article class="panel form-panel">
@@ -1274,10 +1203,10 @@
               <div class="master-form">
                 <label>Name <input id="newUserName" placeholder="Rafiq" /></label>
                 <label>Username <input id="newUserUsername" placeholder="rafiq.cashier" /></label>
-                <label>Password <input id="newUserPassword" placeholder="Give a temporary password" /></label>
+                <label>Password <input id="newUserPassword" type="password" minlength="10" autocomplete="new-password" placeholder="Minimum 10 characters" /></label>
                 <label>Role
                   <select id="newUserRole">
-                    <option value="Master Admin">Master Admin</option>
+                    <option value="Shop Admin">Shop Admin</option>
                     <option value="Cashier">Cashier</option>
                     <option value="Staff">Staff</option>
                   </select>
@@ -1314,6 +1243,7 @@
       </main>
     </div>
 
-    <script src="./app.js?v=20260908-clients-queue-2"></script>
+    <script src="./backend.js?v=20260910-release-1"></script>
+    <script src="./app.js?v=20260910-release-1"></script>
   </body>
 </html>
