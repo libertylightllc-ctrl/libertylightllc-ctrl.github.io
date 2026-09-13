@@ -1010,7 +1010,7 @@ async function reportOperationalError(error, category = "javascript", context = 
       context: {
         operation: context.operation || "",
         status: context.status || "",
-        release: "20260913-release-36",
+        release: "20260913-release-37",
         online: navigator.onLine,
         viewport: `${window.innerWidth}x${window.innerHeight}`
       },
@@ -1477,6 +1477,19 @@ function uniqueUsername(base, shopId = activeShopId) {
     count += 1;
   }
   return username;
+}
+
+function normalizeLoginUsername(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, ".")
+    .replace(/^[._-]+|[._-]+$/g, "")
+    .slice(0, 64);
+}
+
+function normalizeShopCode(value) {
+  return String(value || "").trim().toUpperCase().replace(/[^A-Z0-9_-]+/g, "").slice(0, 32);
 }
 
 function uniqueCustomerId(name) {
@@ -3971,11 +3984,11 @@ async function switchShop(shopId) {
 
 async function createShopFromForm() {
   const name = document.getElementById("newShopName").value.trim();
-  const requestedCode = document.getElementById("newShopCode").value.trim().toUpperCase();
+  const requestedCode = normalizeShopCode(document.getElementById("newShopCode").value);
   const shopCode = requestedCode || (isLocalDemo ? shopCodeFromName(name) : "");
   const location = document.getElementById("newShopLocation").value.trim() || "New branch";
   const owner = document.getElementById("newShopOwner").value.trim() || "Owner";
-  const ownerUsername = document.getElementById("newOwnerUsername").value.trim() || (isLocalDemo ? uniqueUsername(`${owner}.${name}`) : "");
+  const ownerUsername = normalizeLoginUsername(document.getElementById("newOwnerUsername").value || `${owner}.${name}`);
   const ownerPassword = document.getElementById("newOwnerPassword").value;
   const opening = Number(document.getElementById("newShopOpeningCash").value || 0);
   const language = document.getElementById("newShopLanguage").value;
@@ -3983,10 +3996,22 @@ async function createShopFromForm() {
   const profile = countryProfiles[country] || countryProfiles.AE;
   const vat = document.getElementById("newShopVat").value === "on";
   const note = document.getElementById("masterNote");
+  document.getElementById("newShopCode").value = shopCode;
+  document.getElementById("newOwnerUsername").value = ownerUsername;
 
   if (!name || !shopCode || !ownerUsername || !ownerPassword) {
     note.textContent = "Shop name, Shop ID, owner username and password are required.";
     document.getElementById("newShopName").focus();
+    return;
+  }
+  if (!/^[A-Z0-9_-]{3,32}$/.test(shopCode)) {
+    note.textContent = "Shop ID must contain 3 to 32 letters, numbers, underscores or hyphens.";
+    document.getElementById("newShopCode").focus();
+    return;
+  }
+  if (!/^[a-z0-9._-]{3,64}$/.test(ownerUsername)) {
+    note.textContent = "Owner username must contain 3 to 64 letters, numbers, dots, underscores or hyphens.";
+    document.getElementById("newOwnerUsername").focus();
     return;
   }
   if (ownerPassword.length < 10) {
@@ -4432,11 +4457,12 @@ function renderSecurityHistory() {
 async function createUserFromForm() {
   if (!["Owner", "Shop Admin", "Platform Admin"].includes(currentRole)) return;
   const name = document.getElementById("newUserName").value.trim();
-  const username = document.getElementById("newUserUsername").value.trim();
+  const username = normalizeLoginUsername(document.getElementById("newUserUsername").value);
   const password = document.getElementById("newUserPassword").value;
   const role = document.getElementById("newUserRole").value;
   const note = document.getElementById("userAccessNote");
   activeShopState.users = activeShopState.users || [];
+  document.getElementById("newUserUsername").value = username;
 
   if (!name || !username || !password) {
     note.textContent = "Name, username and password are required.";
@@ -4444,6 +4470,10 @@ async function createUserFromForm() {
   }
   if (password.length < 10) {
     note.textContent = "Password must be at least 10 characters.";
+    return;
+  }
+  if (!/^[a-z0-9._-]{3,64}$/.test(username)) {
+    note.textContent = "Username must contain 3 to 64 letters, numbers, dots, underscores or hyphens.";
     return;
   }
   if (activeShopState.users.some((user) => user.username.toLowerCase() === username.toLowerCase())) {

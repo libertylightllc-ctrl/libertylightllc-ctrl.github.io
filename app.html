@@ -23,7 +23,7 @@
       rel="stylesheet"
       href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=IBM+Plex+Sans+Devanagari:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap"
     />
-    <link rel="stylesheet" href="./styles.css?v=20260913-release-36" />
+    <link rel="stylesheet" href="./styles.css?v=20260913-release-37" />
   </head>
   <body>
     <noscript>Salon Control needs JavaScript enabled to run the app.</noscript>
@@ -253,7 +253,7 @@
                 </div>
               </div>
               <div class="master-form">
-                <label>Shop ID <input id="newShopCode" placeholder="ALBARSHA001" /></label>
+                <label>Shop ID <input id="newShopCode" maxlength="32" pattern="[A-Z0-9_-]{3,32}" autocapitalize="characters" spellcheck="false" placeholder="ALBARSHA001" /></label>
                 <label>Shop name <input id="newShopName" placeholder="Marina Gents" /></label>
                 <label>Location <input id="newShopLocation" placeholder="Dubai Marina" /></label>
                 <label>Country
@@ -267,7 +267,7 @@
                   </select>
                 </label>
                 <label>Owner name <input id="newShopOwner" placeholder="Owner name" /></label>
-                <label>Owner username <input id="newOwnerUsername" placeholder="owner.albarsha" /></label>
+                <label>Owner username <input id="newOwnerUsername" maxlength="64" pattern="[a-zA-Z0-9._-]{3,64}" autocapitalize="none" spellcheck="false" placeholder="owner.albarsha" /></label>
                 <label>Temporary password <input id="newOwnerPassword" type="password" minlength="10" autocomplete="new-password" placeholder="Minimum 10 characters" /></label>
                 <label>Opening cash <input id="newShopOpeningCash" type="number" min="0" step="0.01" value="200" /></label>
                 <label>Default language
@@ -1445,7 +1445,7 @@
               </div>
               <div class="master-form">
                 <label>Name <input id="newUserName" placeholder="Rafiq" /></label>
-                <label>Username <input id="newUserUsername" placeholder="rafiq.cashier" /></label>
+                <label>Username <input id="newUserUsername" maxlength="64" pattern="[a-zA-Z0-9._-]{3,64}" autocapitalize="none" spellcheck="false" placeholder="rafiq.cashier" /></label>
                 <label>Password <input id="newUserPassword" type="password" minlength="10" autocomplete="new-password" placeholder="Minimum 10 characters" /></label>
                 <label>Role
                   <select id="newUserRole">
@@ -1605,7 +1605,7 @@
       </section>
     </div>
 
-    <script src="./backend.js?v=20260913-release-36"></script>
-    <script src="./app.js?v=20260913-release-36"></script>
+    <script src="./backend.js?v=20260913-release-37"></script>
+    <script src="./app.js?v=20260913-release-37"></script>
   </body>
 </html>

@@ -65,7 +65,7 @@
     }
     if (!response.ok) {
       const body = await response.json().catch(() => ({}));
-      const message = body.msg || body.message || body.error_description || "Cloud request failed";
+      const message = body.msg || body.message || body.error_description || body.error || "Cloud request failed";
       if (response.status >= 500) notifyOperationalFailure(path, message, response.status);
       throw new Error(message);
     }
