@@ -450,6 +450,9 @@ const uiTranslations = {
   "Save Purchase": { ar: "حفظ المشتريات", hi: "खरीदारी सेव करें", ur: "خریداری محفوظ کریں" },
   "Save Expense": { ar: "حفظ المصروف", hi: "खर्च सेव करें", ur: "خرچ محفوظ کریں" },
   "Save Settings": { ar: "حفظ الإعدادات", hi: "सेटिंग्स सेव करें", ur: "ترتیبات محفوظ کریں" },
+  "Country and currency are assigned by Platform Admin.": { ar: "يحدد مسؤول المنصة الدولة والعملة.", hi: "देश और मुद्रा प्लेटफ़ॉर्म एडमिन तय करता है।", ur: "ملک اور کرنسی پلیٹ فارم ایڈمن مقرر کرتا ہے۔" },
+  "Platform Admin controls the shop country and currency.": { ar: "يتحكم مسؤول المنصة في دولة الصالون وعملته.", hi: "प्लेटफ़ॉर्म एडमिन सैलून का देश और मुद्रा नियंत्रित करता है।", ur: "پلیٹ فارم ایڈمن سیلون کا ملک اور کرنسی کنٹرول کرتا ہے۔" },
+  "Country and currency are locked by Platform Admin.": { ar: "تم قفل الدولة والعملة بواسطة مسؤول المنصة.", hi: "देश और मुद्रा प्लेटफ़ॉर्म एडमिन द्वारा लॉक हैं।", ur: "ملک اور کرنسی پلیٹ فارم ایڈمن نے لاک کیے ہیں۔" },
   Delete: { ar: "حذف", hi: "हटाएं", ur: "حذف کریں" },
   "Purchase deleted. Totals were recalculated.": { ar: "تم حذف المشتريات. تمت إعادة حساب الإجماليات.", hi: "खरीदारी हटाई गई। कुल फिर से गणना हुए।", ur: "خریداری حذف ہو گئی۔ کل دوبارہ حساب ہوا۔" },
   "Expense deleted. Totals were recalculated.": { ar: "تم حذف المصروف. تمت إعادة حساب الإجماليات.", hi: "खर्च हटाया गया। कुल फिर से गणना हुए।", ur: "خرچ حذف ہو گیا۔ کل دوبارہ حساب ہوا۔" },
@@ -1010,7 +1013,7 @@ async function reportOperationalError(error, category = "javascript", context = 
       context: {
         operation: context.operation || "",
         status: context.status || "",
-        release: "20260913-release-37",
+        release: "20260914-release-38",
         online: navigator.onLine,
         viewport: `${window.innerWidth}x${window.innerHeight}`
       },
@@ -3380,6 +3383,10 @@ function applySelectedCountryProfile() {
   const shop = currentShop();
   const select = document.getElementById("countrySelect");
   if (!shop || !select) return;
+  if (currentRole !== "Platform Admin") {
+    select.value = shop.country || currencyToCountry[shop.currency] || "AE";
+    return;
+  }
   const country = select.value || "AE";
   const profile = countryProfiles[country] || countryProfiles.AE;
   shop.country = country;
@@ -3933,6 +3940,12 @@ function applyRoleAccess() {
     document.getElementById(id).hidden = !canManageStaff;
   });
   document.getElementById("accountingPeriodForm").hidden = !["Platform Admin", "Owner", "Shop Admin"].includes(currentRole);
+  const countrySelect = document.getElementById("countrySelect");
+  const countryAccessNote = document.getElementById("countryAccessNote");
+  if (countrySelect) countrySelect.disabled = currentRole !== "Platform Admin";
+  if (countryAccessNote) countryAccessNote.textContent = currentRole === "Platform Admin"
+    ? "Platform Admin controls the shop country and currency."
+    : "Country and currency are locked by Platform Admin.";
   document.getElementById("platformReopenControls").hidden = currentRole !== "Platform Admin";
   document.body.classList.remove("is-platform-admin");
   renderShopSwitcher();
@@ -5926,9 +5939,9 @@ document.getElementById("vatModeSelect").addEventListener("change", (event) => {
 });
 
 document.getElementById("countrySelect").addEventListener("change", (event) => {
-  if (!canManageShopOperations()) return;
-  applySelectedCountryProfile();
-  syncTaxSettings();
+  if (currentRole !== "Platform Admin") {
+    event.target.value = currentShop()?.country || currencyToCountry[currentShop()?.currency] || "AE";
+  }
 });
 
 document.getElementById("receiptModeSelect").addEventListener("change", (event) => {
@@ -5937,9 +5950,29 @@ document.getElementById("receiptModeSelect").addEventListener("change", (event) 
   syncTaxSettings();
 });
 
-document.getElementById("saveSettings").addEventListener("click", () => {
+document.getElementById("saveSettings").addEventListener("click", async () => {
   if (!canManageShopOperations()) return;
-  applySelectedCountryProfile();
+  const button = document.getElementById("saveSettings");
+  const countryNote = document.getElementById("countryAccessNote");
+  const shop = currentShop();
+  if (currentRole === "Platform Admin" && shop) {
+    const country = document.getElementById("countrySelect").value || "AE";
+    if (country !== shop.country && !isLocalDemo) {
+      button.disabled = true;
+      countryNote.textContent = "Updating country and currency...";
+      try {
+        await window.SalonBackend.provision({ action: "update_shop_country", shopId: cloudTargetShopId(), country });
+      } catch (error) {
+        document.getElementById("countrySelect").value = shop.country || "AE";
+        countryNote.textContent = error instanceof Error ? error.message : "Country and currency could not be updated.";
+        button.disabled = false;
+        return;
+      }
+      button.disabled = false;
+    }
+    applySelectedCountryProfile();
+    countryNote.textContent = `Platform Admin assigned ${currentCountryProfile().name} and ${currentCurrency()}.`;
+  }
   document.getElementById("settingsTaxPill").textContent = vatEnabled
     ? "VAT on"
     : "VAT optional";
