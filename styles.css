@@ -1636,6 +1636,11 @@ td code {
   -webkit-overflow-scrolling: touch;
 }
 
+.shop-country-select {
+  min-width: 190px;
+  width: 100%;
+}
+
 .inventory-metrics {
   margin-bottom: 16px;
 }

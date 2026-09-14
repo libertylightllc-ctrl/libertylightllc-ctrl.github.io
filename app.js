@@ -122,7 +122,7 @@ const launchAuditItems = [
   { id: "expenses", area: "Expenses", title: "Cash expenses and shop running costs", priority: "P0", launchRequired: true, marketReason: "Tea, food, laundry, cleaning and repair must affect cash closing.", test: () => !!document.getElementById("expenseCategory") && !!document.getElementById("saveExpense"), next: "Add recurring expenses, approvals and receipt uploads." },
   { id: "inventory", area: "Stock", title: "Consumables and reusable tools", priority: "P0", launchRequired: true, marketReason: "Blades, foam, oil, color and tools must be controlled separately.", test: () => !!document.getElementById("stockList") || !!document.getElementById("inventory"), next: "Add stock counts, batches, expiry, transfers and tool maintenance." },
   { id: "compliance", area: "Compliance", title: "Expiry register and photo/PDF evidence", priority: "P0", launchRequired: true, marketReason: "Lease, visa, pest control and health files need reminders and proof.", test: () => !!document.getElementById("expiryEvidenceFile") && !!document.getElementById("hygieneEvidenceFile"), next: "Store files in cloud storage and add renewal workflow." },
-  { id: "country", area: "GCC", title: "Country profile, currency and VAT mode", priority: "P0", launchRequired: true, marketReason: "UAE, Qatar, Saudi, Kuwait, Bahrain and Oman need different currency and tax defaults.", test: () => !!countryProfiles.AE && !!countryProfiles.QA && !!countryProfiles.SA && !!document.getElementById("countrySelect"), next: "Add official rule packs and per-country compliance templates." },
+  { id: "country", area: "GCC", title: "Platform-assigned country, currency and VAT mode", priority: "P0", launchRequired: true, marketReason: "UAE, Qatar, Saudi, Kuwait, Bahrain and Oman need different currency and tax defaults.", test: () => !!countryProfiles.AE && !!countryProfiles.QA && !!countryProfiles.SA && !!document.getElementById("newShopCountry"), next: "Add official rule packs and per-country compliance templates." },
   { id: "reports", area: "Reporting", title: "Daily close and owner reports", priority: "P0", launchRequired: true, marketReason: "Owners need cash, purchases, expenses, commission and shortage output.", test: () => !!document.getElementById("reportOutputTable") && !!document.getElementById("approveClosing"), next: "Add accountant exports and immutable close periods." },
   { id: "accounting", area: "Accounting", title: "Real accounting ledger", priority: "P0", launchRequired: true, marketReason: "A market product cannot rely on dashboard totals only.", test: () => !!document.querySelector("#accountingJournalTable tr") && !!document.querySelector("#accountingTrialTable tr"), next: "Move journals to backend storage, add supplier balances and locked accounting periods." },
   { id: "backend", area: "Backend", title: "Database, APIs and cloud persistence", priority: "P0", launchRequired: true, marketReason: "Active users need data available across devices and protected from browser clearing.", test: () => false, next: "Add Supabase/Firebase/Postgres backend with migrations and APIs." },
@@ -2382,7 +2382,12 @@ function renderMasterDashboard() {
     row.innerHTML = `
       <td><strong>${escapeHtml(shop.name)}</strong><br><span>${escapeHtml(shop.location)}</span></td>
       <td><code>${escapeHtml(shop.shopCode || "")}</code></td>
-      <td>${escapeHtml(profile.name)}<br><small>${escapeHtml(profile.currency)}</small></td>
+      <td>
+        <label class="sr-only" for="shop-country-${escapeHtml(shop.id)}">Country and currency for ${escapeHtml(shop.name)}</label>
+        <select class="shop-country-select" id="shop-country-${escapeHtml(shop.id)}" data-shop-country="${escapeHtml(shop.id)}" ${isSuspended ? "disabled" : ""}>
+          ${Object.entries(countryProfiles).map(([code, countryProfile]) => `<option value="${code}" ${code === (shop.country || currencyToCountry[shop.currency] || "AE") ? "selected" : ""}>${escapeHtml(countryProfile.name)} · ${escapeHtml(countryProfile.currency)}</option>`).join("")}
+        </select>
+      </td>
       <td>${escapeHtml(shop.owner || "Owner")}</td>
       <td>${moneyFixed(shopSalesTotal(shopState), shop)}</td>
       <td>${moneyFixed(shopExpectedCash(shopState), shop)}</td>
@@ -2390,6 +2395,7 @@ function renderMasterDashboard() {
       <td>
         <div class="action-cluster">
           <button class="mini-action" data-open-shop="${escapeHtml(shop.id)}" type="button" ${isSuspended ? "disabled" : ""}>Open</button>
+          <button class="mini-action" data-assign-country="${escapeHtml(shop.id)}" type="button" ${isSuspended ? "disabled" : ""}>Save currency</button>
           <button class="mini-action" data-manage-users="${escapeHtml(shop.id)}" type="button" ${isSuspended ? "disabled" : ""}>Users</button>
           <button class="mini-action" data-reset-owner="${escapeHtml(shop.id)}" type="button">Reset</button>
           <button class="mini-action" data-toggle-shop="${escapeHtml(shop.id)}" type="button">${isSuspended ? "Restore" : "Suspend"}</button>
@@ -2408,6 +2414,9 @@ function renderMasterDashboard() {
   });
   body.querySelectorAll("[data-reset-owner]").forEach((button) => {
     button.addEventListener("click", () => resetOwnerPassword(button.dataset.resetOwner));
+  });
+  body.querySelectorAll("[data-assign-country]").forEach((button) => {
+    button.addEventListener("click", () => assignShopCountry(button.dataset.assignCountry, button));
   });
   body.querySelectorAll("[data-manage-users]").forEach((button) => {
     button.addEventListener("click", async () => {
@@ -2514,8 +2523,6 @@ function syncShopIdentity() {
   if (setupCountryLabel) setupCountryLabel.textContent = `${profile.name} · ${profile.currency} currency · ${vatEnabled ? "VAT on" : "VAT optional"}`;
   const reportSubtitle = document.querySelector(".report-header p");
   if (reportSubtitle) reportSubtitle.textContent = `${shop.name} · ${todayLabel()} · ${vatEnabled ? "VAT records" : "non-VAT internal records"}`;
-  const countrySelect = document.getElementById("countrySelect");
-  if (countrySelect) countrySelect.value = shop.country || currencyToCountry[shop.currency] || "AE";
   renderShopSwitcher();
   renderUserManagement();
 }
@@ -3379,31 +3386,6 @@ function renderCompliance() {
   applyTranslations();
 }
 
-function applySelectedCountryProfile() {
-  const shop = currentShop();
-  const select = document.getElementById("countrySelect");
-  if (!shop || !select) return;
-  if (currentRole !== "Platform Admin") {
-    select.value = shop.country || currencyToCountry[shop.currency] || "AE";
-    return;
-  }
-  const country = select.value || "AE";
-  const profile = countryProfiles[country] || countryProfiles.AE;
-  shop.country = country;
-  shop.currency = profile.currency;
-  ensureComplianceDocumentsForCountry();
-  syncShopIdentity();
-  renderPurchaseTable();
-  renderExpenseTable();
-  renderServiceTable();
-  renderSaleServices();
-  renderInventory();
-  renderClientsQueue();
-  syncSelectedServiceLabel();
-  renderCompliance();
-  syncSummaryTotals();
-}
-
 function renderOwnerChecks() {
   const container = document.getElementById("ownerCheckList");
   if (!container) return;
@@ -3940,12 +3922,6 @@ function applyRoleAccess() {
     document.getElementById(id).hidden = !canManageStaff;
   });
   document.getElementById("accountingPeriodForm").hidden = !["Platform Admin", "Owner", "Shop Admin"].includes(currentRole);
-  const countrySelect = document.getElementById("countrySelect");
-  const countryAccessNote = document.getElementById("countryAccessNote");
-  if (countrySelect) countrySelect.disabled = currentRole !== "Platform Admin";
-  if (countryAccessNote) countryAccessNote.textContent = currentRole === "Platform Admin"
-    ? "Platform Admin controls the shop country and currency."
-    : "Country and currency are locked by Platform Admin.";
   document.getElementById("platformReopenControls").hidden = currentRole !== "Platform Admin";
   document.body.classList.remove("is-platform-admin");
   renderShopSwitcher();
@@ -3954,6 +3930,43 @@ function applyRoleAccess() {
 
 function canManageShopOperations() {
   return ["Platform Admin", "Owner", "Shop Admin"].includes(currentRole);
+}
+
+async function assignShopCountry(shopId, button) {
+  if (currentRole !== "Platform Admin") return;
+  const shop = shops.find((candidate) => candidate.id === shopId && candidate.deleted !== true);
+  const select = document.getElementById(`shop-country-${shopId}`);
+  const country = select?.value;
+  if (!shop || !countryProfiles[country]) return;
+
+  const previousCountry = shop.country || currencyToCountry[shop.currency] || "AE";
+  if (country === previousCountry) {
+    document.getElementById("masterNote").textContent = `${shop.name} already uses ${countryProfiles[country].currency}.`;
+    return;
+  }
+
+  button.disabled = true;
+  button.textContent = "Saving…";
+  try {
+    if (!isLocalDemo) {
+      await window.SalonBackend.provision({ action: "update_shop_country", shopId, country });
+    }
+    shop.country = country;
+    shop.currency = countryProfiles[country].currency;
+    if (activeShopId === shopId) {
+      ensureComplianceDocumentsForCountry();
+      renderCompliance();
+      syncTaxSettings();
+    }
+    saveState();
+    document.getElementById("masterNote").textContent = `${shop.name} assigned to ${countryProfiles[country].name} · ${countryProfiles[country].currency}.`;
+    renderMasterDashboard();
+  } catch (error) {
+    select.value = previousCountry;
+    button.disabled = false;
+    button.textContent = "Save currency";
+    document.getElementById("masterNote").textContent = error instanceof Error ? error.message : "Country and currency could not be updated.";
+  }
 }
 
 async function switchShop(shopId) {
@@ -5938,12 +5951,6 @@ document.getElementById("vatModeSelect").addEventListener("change", (event) => {
   syncTaxSettings();
 });
 
-document.getElementById("countrySelect").addEventListener("change", (event) => {
-  if (currentRole !== "Platform Admin") {
-    event.target.value = currentShop()?.country || currencyToCountry[currentShop()?.currency] || "AE";
-  }
-});
-
 document.getElementById("receiptModeSelect").addEventListener("change", (event) => {
   if (!canManageShopOperations()) return;
   receiptEnabled = event.target.value !== "off";
@@ -5952,27 +5959,6 @@ document.getElementById("receiptModeSelect").addEventListener("change", (event) 
 
 document.getElementById("saveSettings").addEventListener("click", async () => {
   if (!canManageShopOperations()) return;
-  const button = document.getElementById("saveSettings");
-  const countryNote = document.getElementById("countryAccessNote");
-  const shop = currentShop();
-  if (currentRole === "Platform Admin" && shop) {
-    const country = document.getElementById("countrySelect").value || "AE";
-    if (country !== shop.country && !isLocalDemo) {
-      button.disabled = true;
-      countryNote.textContent = "Updating country and currency...";
-      try {
-        await window.SalonBackend.provision({ action: "update_shop_country", shopId: cloudTargetShopId(), country });
-      } catch (error) {
-        document.getElementById("countrySelect").value = shop.country || "AE";
-        countryNote.textContent = error instanceof Error ? error.message : "Country and currency could not be updated.";
-        button.disabled = false;
-        return;
-      }
-      button.disabled = false;
-    }
-    applySelectedCountryProfile();
-    countryNote.textContent = `Platform Admin assigned ${currentCountryProfile().name} and ${currentCurrency()}.`;
-  }
   document.getElementById("settingsTaxPill").textContent = vatEnabled
     ? "VAT on"
     : "VAT optional";
@@ -6946,7 +6932,6 @@ function syncTaxSettings() {
     ? `${totalServiceItemsSold()} services · ${purchases.length} purchase records · ${vatEnabled ? "VAT calculated separately" : "no VAT added"}`
     : `${totalServiceItemsSold()} · ${translate("Services")} · ${purchases.length} · ${translate("Purchases")}`;
   document.getElementById("vatModeSelect").value = vatEnabled ? "on" : "off";
-  document.getElementById("countrySelect").value = currentShop()?.country || currencyToCountry[currentShop()?.currency] || "AE";
   document.getElementById("receiptModeSelect").value = receiptEnabled ? "simple" : "off";
   document.getElementById("settingsTaxPill").textContent = translate(vatEnabled ? "VAT On" : "VAT optional");
   syncShopIdentity();
