@@ -1221,19 +1221,34 @@ async function prepareCloudIdentity(identity, username = "Account", mustChangePa
   if (!role) throw new Error("Account role is not supported");
   cloudIdentity = identity;
   if (identity.shop_id) {
+    const remoteShops = await window.SalonBackend.loadShops();
+    const remoteShop = remoteShops.find((candidate) => candidate.id === identity.shop_id);
+    if (!remoteShop?.country || !countryProfiles[remoteShop.country]) {
+      throw new Error("The shop country and currency assignment could not be loaded");
+    }
     let shop = shops.find((candidate) => candidate.id === identity.shop_id);
     if (!shop) {
       shop = {
         id: identity.shop_id,
-        shopCode: identity.shop_code,
-        name: identity.shop_name,
+        shopCode: remoteShop.code || identity.shop_code,
+        name: remoteShop.name || identity.shop_name,
         location: "",
-        country: "AE",
-        currency: "AED",
-        enabled: true
+        country: remoteShop.country,
+        currency: countryProfiles[remoteShop.country].currency,
+        enabled: remoteShop.status === "active",
+        status: remoteShop.status
       };
       shops.push(shop);
       shopStates[shop.id] = createProductionShopState(shop.country || "AE");
+    } else {
+      Object.assign(shop, {
+        shopCode: remoteShop.code || identity.shop_code,
+        name: remoteShop.name || identity.shop_name,
+        country: remoteShop.country,
+        currency: countryProfiles[remoteShop.country].currency,
+        enabled: remoteShop.status === "active",
+        status: remoteShop.status
+      });
     }
     activeShopId = shop.id;
     await ensureCloudShopInitialized(shop.id, role);
