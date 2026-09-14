@@ -4766,6 +4766,7 @@ function renderServiceTable() {
   const canEdit = ["Platform Admin", "Owner", "Shop Admin"].includes(currentRole);
   body.innerHTML = "";
   services.forEach((service, index) => {
+    if (service.active === false) return;
     const row = document.createElement("tr");
     row.innerHTML = `
       <td><strong>${escapeHtml(serviceName(service))}</strong></td>
@@ -4773,10 +4774,16 @@ function renderServiceTable() {
       <td>${escapeHtml(translate(service.category))}</td>
       <td>${money(service.price)}</td>
       <td>${escapeHtml(serviceRecipeLabel(service))}</td>
-      <td>${translate(service.active ? "Active" : "Inactive")}</td>
-      <td>${canEdit ? `<button class="danger-button" data-delete-service="${index}" type="button" ${service.active === false ? "disabled" : ""}>${service.active === false ? "Archived" : "Archive"}</button>` : "-"}</td>
+      <td>${translate("Active")}</td>
+      <td>${canEdit ? `<div class="action-cluster"><button class="mini-action" data-edit-service="${index}" type="button">Edit</button><button class="danger-button" data-delete-service="${index}" type="button">Delete</button></div>` : "-"}</td>
     `;
-    if (canEdit && service.active !== false) row.addEventListener("click", () => {
+    body.appendChild(row);
+  });
+
+  body.querySelectorAll("[data-edit-service]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const service = services[Number(button.dataset.editService)];
+      if (!service || service.active === false) return;
       document.getElementById("serviceEditId").value = service.id;
       document.getElementById("serviceName").value = service.name;
       document.getElementById("serviceNameAr").value = service.names?.ar || "";
@@ -4789,31 +4796,31 @@ function renderServiceTable() {
       document.getElementById("serviceChangeReason").value = "";
       renderRecipeBuilder();
       document.getElementById("serviceFormTitle").textContent = `Edit ${service.name}`;
+      document.getElementById("serviceNote").textContent = `Editing ${service.name}. Update the fields and enter a change reason.`;
+      document.getElementById("serviceEditor").scrollIntoView({ behavior: "smooth", block: "start" });
+      document.getElementById("serviceName").focus({ preventScroll: true });
     });
-    body.appendChild(row);
   });
 
   body.querySelectorAll("[data-delete-service]").forEach((button) => {
-    button.addEventListener("click", async (event) => {
-      event.stopPropagation();
+    button.addEventListener("click", async () => {
       const index = Number(button.dataset.deleteService);
       const service = services[index];
-      if (!window.confirm("Archive this service? Sales history will remain.")) return;
-      const reason = document.getElementById("serviceChangeReason").value.trim();
-      if (!reason) {
-        document.getElementById("serviceNote").textContent = "Enter the archive reason in the service editor first.";
-        return;
-      }
+      if (!service || service.active === false || !window.confirm(`Delete ${service.name} from the service menu? Existing sales will remain.`)) return;
+      const reason = window.prompt("Reason for deleting this service", "Removed from service menu")?.trim();
+      if (!reason) return;
+      button.disabled = true;
       if (!isLocalDemo) {
         try {
           const result = await window.SalonBackend.archiveService(cloudTargetShopId(), service.id, reason);
           if (result?.service) Object.assign(service, result.service);
         } catch (error) {
           document.getElementById("serviceNote").textContent = error.message;
+          button.disabled = false;
           return;
         }
       } else Object.assign(service, { active:false, archiveReason:reason, archivedAt:new Date().toISOString(), archivedBy:currentUser?.name || currentRole });
-      addAudit("Stock adjusted", `${currentRole} · service archived · ${service.name} · ${reason}`);
+      addAudit("Stock adjusted", `${currentRole} · service deleted · ${service.name} · ${reason}`);
       selectedService = services.find((candidate) => candidate.active !== false) || { name: "No service", price: 0, active: false };
       selectedSaleServices = selectedService.active === false ? [] : [selectedService];
       saveState();
@@ -4822,7 +4829,7 @@ function renderServiceTable() {
       syncSelectedServiceLabel();
       document.getElementById("serviceEditId").value = "";
       document.getElementById("serviceChangeReason").value = "";
-      document.getElementById("serviceNote").textContent = `${service.name} archived. Existing sales remain unchanged.`;
+      document.getElementById("serviceNote").textContent = `${service.name} deleted from the service menu. Existing sales remain unchanged.`;
     });
   });
 }
