@@ -1996,6 +1996,10 @@ document.getElementById("createShopBtn")?.addEventListener("click", createShopFr
 document.getElementById("createUserBtn")?.addEventListener("click", createUserFromForm);
 document.getElementById("shopSearch")?.addEventListener("input", renderMasterDashboard);
 document.getElementById("shopStatusFilter")?.addEventListener("change", renderMasterDashboard);
+document.getElementById("newShopCountry")?.addEventListener("change", (event) => {
+  const decimals = countryProfiles[event.target.value]?.decimals || 2;
+  document.getElementById("newShopOpeningCash").step = decimals === 3 ? "0.001" : "0.01";
+});
 document.getElementById("saveCustomer")?.addEventListener("click", saveCustomerFromForm);
 document.getElementById("saveBooking")?.addEventListener("click", saveBookingFromForm);
 document.getElementById("closeAccountingPeriod")?.addEventListener("click", closeAccountingPeriodFromForm);
@@ -2065,8 +2069,8 @@ function accountingExportRows() {
       entry.date || "",
       entry.account || "",
       entry.description || "",
-      entry.debit ? entry.debit.toFixed(2) : "",
-      entry.credit ? entry.credit.toFixed(2) : "",
+      entry.debit ? Number(entry.debit).toFixed(currentCountryProfile().decimals) : "",
+      entry.credit ? Number(entry.credit).toFixed(currentCountryProfile().decimals) : "",
       entry.source || ""
     ])
   ];
@@ -2082,8 +2086,8 @@ function stockMovementRows() {
       movement.itemName || item?.name || "",
       movement.quantity || 0,
       movement.unit || item?.unit || "",
-      Number(movement.unitCost || item?.unitCost || 0).toFixed(2),
-      (Math.abs(Number(movement.quantity || 0)) * Number(movement.unitCost || item?.unitCost || 0)).toFixed(2),
+      Number(movement.unitCost || item?.unitCost || 0).toFixed(currentCountryProfile().decimals),
+      (Math.abs(Number(movement.quantity || 0)) * Number(movement.unitCost || item?.unitCost || 0)).toFixed(currentCountryProfile().decimals),
       movement.reference || movement.reason || ""
     ]);
   });
@@ -2094,9 +2098,9 @@ function shortageRows() {
   const rows = [["Date", "Expected cash", "Actual cash", "Difference", "Reason", "Approved by"]];
   cashClosings.forEach((closing) => rows.push([
     closing.createdAt || "",
-    Number(closing.expected || 0).toFixed(2),
-    Number(closing.actual || 0).toFixed(2),
-    Number(closing.difference || 0).toFixed(2),
+    Number(closing.expected || 0).toFixed(currentCountryProfile().decimals),
+    Number(closing.actual || 0).toFixed(currentCountryProfile().decimals),
+    Number(closing.difference || 0).toFixed(currentCountryProfile().decimals),
     closing.reason || "",
     closing.approvedBy || ""
   ]));
@@ -2192,6 +2196,20 @@ function syncSelectedServiceLabel() {
 
 function currencyAmount(value) {
   return Number((Number(value) || 0).toFixed(currentCountryProfile().decimals));
+}
+
+function syncCurrencyInputPrecision() {
+  const step = currentCountryProfile().decimals === 3 ? "0.001" : "0.01";
+  document.querySelectorAll('#appShell input[type="number"][step="0.01"]').forEach((input) => {
+    input.dataset.currencyInput = "true";
+  });
+  document.querySelectorAll('#appShell input[data-currency-input="true"]').forEach((input) => {
+    if (input.id === "newShopOpeningCash") return;
+    input.step = step;
+    if (input.min === "0.01" || input.min === "0.001") input.min = step;
+  });
+  const newShopCountry = document.getElementById("newShopCountry")?.value || "AE";
+  document.getElementById("newShopOpeningCash").step = countryProfiles[newShopCountry]?.decimals === 3 ? "0.001" : "0.01";
 }
 
 function checkoutTotals() {
@@ -2899,10 +2917,10 @@ function groupedMoneyForShops(sourceShops, selector) {
 
 function updateClosingCalculation() {
   openingCash = numberValue("closingOpeningCash");
-  document.getElementById("closingCashSales").value = cashSalesTotal().toFixed(2);
-  document.getElementById("closingCashExpenses").value = cashOutTotal(expenses).toFixed(2);
-  document.getElementById("closingCashPurchases").value = (cashOutTotal(purchases) + cashOutTotal(supplierPayments)).toFixed(2);
-  document.getElementById("closingCashPayroll").value = cashPayrollPaidTotal().toFixed(2);
+  document.getElementById("closingCashSales").value = cashSalesTotal().toFixed(currentCountryProfile().decimals);
+  document.getElementById("closingCashExpenses").value = cashOutTotal(expenses).toFixed(currentCountryProfile().decimals);
+  document.getElementById("closingCashPurchases").value = (cashOutTotal(purchases) + cashOutTotal(supplierPayments)).toFixed(currentCountryProfile().decimals);
+  document.getElementById("closingCashPayroll").value = cashPayrollPaidTotal().toFixed(currentCountryProfile().decimals);
   const expected = expectedCashTotal();
   const difference = numberValue("closingActualCash") - expected;
   document.getElementById("closingExpectedCash").textContent = moneyFixed(expected);
@@ -4003,7 +4021,7 @@ async function switchShop(shopId) {
   removeLegacyDemoRows();
   migrateServices();
   migratePurchasing();
-  document.getElementById("closingOpeningCash").value = openingCash.toFixed(2);
+  document.getElementById("closingOpeningCash").value = openingCash.toFixed(currentCountryProfile().decimals);
   renderSaleServices();
   renderClientsQueue();
   renderServiceTable();
@@ -4116,7 +4134,7 @@ async function createShopFromForm() {
   document.getElementById("newShopOwner").value = "";
   document.getElementById("newOwnerUsername").value = "";
   document.getElementById("newOwnerPassword").value = "";
-  document.getElementById("closingOpeningCash").value = openingCash.toFixed(2);
+  document.getElementById("closingOpeningCash").value = openingCash.toFixed(currentCountryProfile().decimals);
   renderSaleServices();
   renderServiceTable();
   renderPurchaseTable();
@@ -6933,6 +6951,7 @@ document.querySelectorAll("[data-export]").forEach((button) => {
 
 function syncTaxSettings() {
   const profile = currentCountryProfile();
+  syncCurrencyInputPrecision();
   const taxMode = vatEnabled ? "VAT On" : "VAT Off";
   const branchLabel = vatEnabled ? "VAT enabled · tax invoice mode" : "VAT optional · currently off";
   const checkoutNote = vatEnabled ? "VAT on: tax invoice mode" : "VAT off: internal sale record only";
@@ -6964,7 +6983,7 @@ function syncTaxSettings() {
 migrateServices();
 migratePurchasing();
 removeLegacyDemoRows();
-document.getElementById("closingOpeningCash").value = openingCash.toFixed(2);
+document.getElementById("closingOpeningCash").value = openingCash.toFixed(currentCountryProfile().decimals);
 document.getElementById("purchaseDate").value = todayIso();
 document.getElementById("staffJoinDate").value = todayIso();
 document.getElementById("attendanceDate").value = todayIso();
