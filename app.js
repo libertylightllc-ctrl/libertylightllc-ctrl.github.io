@@ -745,6 +745,7 @@ const defaultState = {
   expenses: [],
   receiptEnabled: false,
   vatEnabled: false,
+  inventoryTrackingEnabled: true,
   openingCash: 200,
   sales: [],
   refunds: [],
@@ -816,6 +817,7 @@ const shopStateFields = [
   "expenses",
   "receiptEnabled",
   "vatEnabled",
+  "inventoryTrackingEnabled",
   "openingCash",
   "sales",
   "refunds",
@@ -855,6 +857,7 @@ function createShopState(overrides = {}) {
 
 function createProductionShopState(country = "AE", overrides = {}) {
   return createShopState({
+    inventoryTrackingEnabled: false,
     inventoryItems: defaultInventoryItems(false),
     stockMovements: [],
     suppliers: [],
@@ -930,6 +933,7 @@ let selectedSaleServices = selectedService ? [selectedService] : [];
 let recipeDraft = clone(selectedService?.recipeItems || []);
 let receiptEnabled = activeShopState.receiptEnabled;
 let vatEnabled = activeShopState.vatEnabled;
+let inventoryTrackingEnabled = activeShopState.inventoryTrackingEnabled !== false;
 let openingCash = Number(activeShopState.openingCash ?? defaultState.openingCash);
 let activeLanguage = state.activeLanguage || "en";
 let activeTheme = document.documentElement.dataset.theme === "dark" ? "dark" : "light";
@@ -1108,7 +1112,7 @@ function buildCloudRecords() {
       shop_id: targetShopId,
       record_type: "shop_setting",
       external_id: "operations",
-      data: { receiptEnabled, vatEnabled, openingCash, checklist, catalogInitializedAt: activeShopState.catalogInitializedAt || "" },
+      data: { receiptEnabled, vatEnabled, inventoryTrackingEnabled, openingCash, checklist, catalogInitializedAt: activeShopState.catalogInitializedAt || "" },
       deleted_at: null
     });
   }
@@ -1391,6 +1395,7 @@ function captureActiveShopState() {
     supplierPayments,
     receiptEnabled,
     vatEnabled,
+    inventoryTrackingEnabled,
     openingCash,
     sales,
     refunds,
@@ -1433,6 +1438,7 @@ function hydrateActiveShop() {
   recipeDraft = clone(selectedService.recipeItems || []);
   receiptEnabled = !!activeShopState.receiptEnabled;
   vatEnabled = !!activeShopState.vatEnabled;
+  inventoryTrackingEnabled = activeShopState.inventoryTrackingEnabled !== false;
   openingCash = Number(activeShopState.openingCash ?? defaultState.openingCash);
   sales = activeShopState.sales || [];
   refunds = activeShopState.refunds || [];
@@ -1778,6 +1784,7 @@ function saveState() {
     checklist,
     receiptEnabled,
     vatEnabled,
+    inventoryTrackingEnabled,
     openingCash,
     activeLanguage,
     inspectionRecords,
@@ -4779,6 +4786,11 @@ function renderSaleServices() {
     });
 }
 
+function syncInventoryTracking() {
+  document.getElementById("inventoryTrackingEnabled").checked = inventoryTrackingEnabled;
+  document.querySelector(".recipe-builder").hidden = !inventoryTrackingEnabled;
+}
+
 function renderServiceTable() {
   const body = document.getElementById("serviceTable");
   const canEdit = ["Platform Admin", "Owner", "Shop Admin"].includes(currentRole);
@@ -5268,7 +5280,7 @@ function renderStaffModule() {
   const visibleAttendance = attendanceRecords.filter((record) => visibleIds.has(record.staffId));
   attendanceBody.innerHTML = visibleAttendance.length ? [...visibleAttendance].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 60).map((record) => {
     const profile = staffProfiles.find((candidate) => candidate.id === record.staffId);
-    return `<tr><td>${escapeHtml(record.date)}</td><td>${escapeHtml(profile?.name || "Staff")}</td><td>${escapeHtml(record.status)}</td><td>${escapeHtml(record.clockIn || "-")}</td><td>${escapeHtml(record.clockOut || "-")}</td><td>${record.hours || 0}</td><td>${escapeHtml(record.note || "-")}</td></tr>`;
+    return `<tr><td>${escapeHtml(record.date)}</td><td>${escapeHtml(profile?.name || "Staff")}</td><td>${escapeHtml(record.status)}</td><td>${escapeHtml(record.clockIn || "-")}</td><td>${escapeHtml(record.clockOut || "-")}</td><td>${record.clockIn && record.clockOut ? Number(record.hours || 0) : "-"}</td><td>${escapeHtml(record.note || "-")}</td></tr>`;
   }).join("") : '<tr><td colspan="7">No attendance records yet.</td></tr>';
 
   const payrollBody = document.getElementById("payrollTable");
@@ -5775,7 +5787,7 @@ document.getElementById("saveSale").addEventListener("click", async () => {
   const staff = document.getElementById("saleStaff").value;
   const customer = selectedCustomer();
   const serviceList = selected.map((service) => service.name);
-  const usage = saleStockUsage(selected);
+  const usage = inventoryTrackingEnabled ? saleStockUsage(selected) : [];
   const shortage = usage.map((line) => {
     const item = inventoryItems.find((candidate) => candidate.id === line.itemId && candidate.active !== false);
     return !item || Number(item.quantity || 0) < line.quantity ? { item, ...line } : null;
@@ -5810,7 +5822,7 @@ document.getElementById("saveSale").addEventListener("click", async () => {
   if (!isLocalDemo) {
     const button = document.getElementById("saveSale");
     button.disabled = true;
-    document.getElementById("saleNote").textContent = "Checking stock and saving sale…";
+    document.getElementById("saleNote").textContent = inventoryTrackingEnabled ? "Checking stock and saving sale…" : "Saving sale…";
     try {
       await window.SalonBackend.recordSale(cloudTargetShopId(), sale, usage);
     } catch (error) {
@@ -5999,6 +6011,8 @@ document.getElementById("receiptModeSelect").addEventListener("change", (event) 
 
 document.getElementById("saveSettings").addEventListener("click", async () => {
   if (!canManageShopOperations()) return;
+  inventoryTrackingEnabled = document.getElementById("inventoryTrackingEnabled").checked;
+  syncInventoryTracking();
   document.getElementById("settingsTaxPill").textContent = vatEnabled
     ? "VAT on"
     : "VAT optional";
@@ -6516,10 +6530,11 @@ document.getElementById("saveAttendance").addEventListener("click", async () => 
   const profile = staffProfiles.find((candidate) => candidate.id === staffId);
   const date = document.getElementById("attendanceDate").value || todayIso();
   const status = document.getElementById("attendanceStatus").value;
-  const clockIn = status === "Present" ? document.getElementById("attendanceClockIn").value : "";
-  const clockOut = status === "Present" ? document.getElementById("attendanceClockOut").value : "";
-  if (!profile || (status === "Present" && (!clockIn || !clockOut))) {
-    document.getElementById("attendanceNote").textContent = "Select staff and enter both shift times for a present day.";
+  const recordClockTimes = status === "Present" && document.getElementById("attendanceUseClockTimes").checked;
+  const clockIn = recordClockTimes ? document.getElementById("attendanceClockIn").value : "";
+  const clockOut = recordClockTimes ? document.getElementById("attendanceClockOut").value : "";
+  if (!profile || (recordClockTimes && (!clockIn || !clockOut))) {
+    document.getElementById("attendanceNote").textContent = "Select staff and, when recording clock times, enter both times.";
     return;
   }
   const record = {
@@ -6530,7 +6545,7 @@ document.getElementById("saveAttendance").addEventListener("click", async () => 
     status,
     clockIn,
     clockOut,
-    hours: status === "Present" ? hoursBetween(clockIn, clockOut) : 0,
+    hours: recordClockTimes ? hoursBetween(clockIn, clockOut) : 0,
     note: document.getElementById("attendanceNoteInput").value.trim(),
     recordedBy: currentUser?.name || currentRole,
     createdAt: new Date().toISOString()
@@ -6561,7 +6576,36 @@ document.getElementById("saveAttendance").addEventListener("click", async () => 
   saveState();
   renderStaffModule();
   document.getElementById("attendanceChangeReason").value = "";
-  document.getElementById("attendanceNote").textContent = `${profile.name}: ${status}, ${record.hours} hours.`;
+  document.getElementById("attendanceNote").textContent = `${profile.name}: ${status}${recordClockTimes ? `, ${record.hours} hours` : ""}.`;
+});
+
+function syncAttendanceClockFields() {
+  const show = document.getElementById("attendanceStatus").value === "Present" && document.getElementById("attendanceUseClockTimes").checked;
+  document.getElementById("attendanceClockFields").hidden = !show;
+}
+
+document.getElementById("attendanceStatus").addEventListener("change", syncAttendanceClockFields);
+document.getElementById("attendanceUseClockTimes").addEventListener("change", syncAttendanceClockFields);
+
+document.querySelectorAll('input[type="password"]').forEach((input) => {
+  const wrap = document.createElement("span");
+  wrap.className = "password-visibility";
+  input.before(wrap);
+  wrap.appendChild(input);
+  const button = document.createElement("button");
+  button.className = "password-visibility-button";
+  button.type = "button";
+  button.textContent = "Show";
+  button.setAttribute("aria-label", "Show password");
+  button.setAttribute("aria-pressed", "false");
+  button.addEventListener("click", () => {
+    const visible = input.type === "password";
+    input.type = visible ? "text" : "password";
+    button.textContent = visible ? "Hide" : "Show";
+    button.setAttribute("aria-label", `${visible ? "Hide" : "Show"} password`);
+    button.setAttribute("aria-pressed", String(visible));
+  });
+  wrap.appendChild(button);
 });
 
 document.getElementById("saveStaffAdjustment").addEventListener("click", async () => {
@@ -6951,6 +6995,7 @@ document.querySelectorAll("[data-export]").forEach((button) => {
 
 function syncTaxSettings() {
   const profile = currentCountryProfile();
+  syncInventoryTracking();
   syncCurrencyInputPrecision();
   const taxMode = vatEnabled ? "VAT On" : "VAT Off";
   const branchLabel = vatEnabled ? "VAT enabled · tax invoice mode" : "VAT optional · currently off";

@@ -23,7 +23,7 @@
       rel="stylesheet"
       href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=IBM+Plex+Sans+Devanagari:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap"
     />
-    <link rel="stylesheet" href="./styles.css?v=20260916-release-42" />
+    <link rel="stylesheet" href="./styles.css?v=20260918-release-43" />
   </head>
   <body>
     <noscript>Salon Control needs JavaScript enabled to run the app.</noscript>
@@ -945,7 +945,8 @@
               <label>Staff <select id="attendanceStaff"></select></label>
               <label>Date <input id="attendanceDate" type="date" /></label>
               <label>Status <select id="attendanceStatus"><option>Present</option><option>Absent</option><option>Paid Leave</option><option>Unpaid Leave</option><option>Rest Day</option></select></label>
-              <div class="inline-fields"><label>Clock in <input id="attendanceClockIn" type="time" value="10:00" /></label><label>Clock out <input id="attendanceClockOut" type="time" value="20:00" /></label></div>
+              <label class="setting-toggle"><input id="attendanceUseClockTimes" type="checkbox" /> Record clock times</label>
+              <div class="inline-fields" id="attendanceClockFields" hidden><label>Clock in <input id="attendanceClockIn" type="time" value="10:00" /></label><label>Clock out <input id="attendanceClockOut" type="time" value="20:00" /></label></div>
               <label>Note <input id="attendanceNoteInput" placeholder="Reason or shift note" /></label>
               <label>Correction reason <input id="attendanceChangeReason" placeholder="Required when changing an existing day" /></label>
               <button class="primary-button full" id="saveAttendance" type="button">Save Attendance</button>
@@ -1398,6 +1399,7 @@
                   <option value="whatsapp">WhatsApp receipt optional</option>
                 </select>
               </label>
+              <label class="setting-toggle"><input id="inventoryTrackingEnabled" type="checkbox" checked /> Track service inventory</label>
               <button class="primary-button full" id="saveSettings" type="button">Save Settings</button>
             </article>
 
@@ -1560,11 +1562,11 @@
         <form id="managedPasswordForm">
           <label>Temporary password
             <div class="password-generator-row">
-              <input id="managedNewPassword" type="text" minlength="10" maxlength="128" autocomplete="new-password" required />
+              <input id="managedNewPassword" type="password" minlength="10" maxlength="128" autocomplete="new-password" required />
               <button class="ghost-button" id="generateManagedPassword" type="button">Generate</button>
             </div>
           </label>
-          <label>Confirm password <input id="managedConfirmPassword" type="text" minlength="10" maxlength="128" autocomplete="new-password" required /></label>
+          <label>Confirm password <input id="managedConfirmPassword" type="password" minlength="10" maxlength="128" autocomplete="new-password" required /></label>
           <p class="system-note" id="managedPasswordNote">The user must replace this temporary password after login.</p>
           <div class="account-security-actions">
             <button class="ghost-button" id="cancelManagedPassword" type="button">Cancel</button>
@@ -1595,7 +1597,7 @@
       </section>
     </div>
 
-    <script src="./backend.js?v=20260916-release-42"></script>
-    <script src="./app.js?v=20260916-release-42"></script>
+    <script src="./backend.js?v=20260918-release-43"></script>
+    <script src="./app.js?v=20260918-release-43"></script>
   </body>
 </html>

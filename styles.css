@@ -48,6 +48,49 @@
   --touch: 56px;
 }
 
+.password-visibility {
+  position: relative;
+  display: block;
+  width: 100%;
+}
+
+.password-visibility input {
+  width: 100%;
+  padding-inline-end: 4.5rem;
+}
+
+.password-visibility-button {
+  position: absolute;
+  inset-inline-end: 0.45rem;
+  top: 50%;
+  transform: translateY(-50%);
+  border: 0;
+  background: transparent;
+  color: var(--ink-2);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0.4rem;
+}
+
+.password-visibility-button:focus-visible {
+  outline: 2px solid var(--live);
+  outline-offset: 2px;
+}
+
+.setting-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.setting-toggle input {
+  width: 1.1rem;
+  min-height: 1.1rem;
+  accent-color: var(--live);
+}
+
 :root[data-theme="dark"] {
   color-scheme: dark;
   --green: #123f34;
@@ -403,6 +446,10 @@ button {
 .premium-login .login-card input:focus {
   border-color: var(--brass-lt);
   box-shadow: 0 0 0 4px rgba(231, 200, 122, 0.14);
+}
+
+.premium-login .login-card .password-visibility input {
+  padding-inline-end: 4.5rem;
 }
 
 .premium-login .status-pill {
