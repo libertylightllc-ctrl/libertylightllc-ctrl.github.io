@@ -2018,6 +2018,9 @@ document.getElementById("bookingType")?.addEventListener("change", (event) => {
   document.getElementById("bookingCancellationPolicy").disabled = !isAppointment;
   if (!isAppointment) document.getElementById("bookingDeposit").value = "0";
 });
+document.getElementById("bookingCustomer")?.addEventListener("change", (event) => {
+  document.getElementById("bookingGuestFields").hidden = event.target.value !== "walk-in-guest";
+});
 document.getElementById("runLaunchAudit")?.addEventListener("click", () => {
   renderLaunchAudit();
   addAudit("Stock adjusted", `${currentRole} · launch audit checked · ${new Date().toLocaleTimeString("en-AE", { hour: "2-digit", minute: "2-digit" })}`);
@@ -2699,6 +2702,7 @@ function paymentAccount(payment) {
 }
 
 function purchaseDebitAccount(purchase) {
+  if (purchase.trackStock === false && purchase.type !== "Reusable tool / asset") return "6100 Shop operating expenses";
   if (purchase.type === "Reusable tool / asset") return "1500 Reusable tools and equipment";
   if (purchase.type === "Operational supply") return "6100 Shop operating expenses";
   return "1200 Inventory and supplies";
@@ -2717,7 +2721,7 @@ function journalEntries() {
   queueTickets.filter((ticket) => Number(ticket.deposit || 0) > 0).forEach((ticket) => {
     const amount = Number(ticket.deposit || 0);
     const payment = ticket.depositPayment || "Cash";
-    const description = `${customerById(ticket.customerId).name} · booking deposit · ${ticket.service}`;
+    const description = `${ticket.customerName || customerById(ticket.customerId).name} · booking deposit · ${ticket.service}`;
     entries.push(journalLine(ticket.createdAt || "", paymentAccount(payment), description, amount, 0, "booking-deposit"));
     entries.push(journalLine(ticket.createdAt || "", "2300 Customer deposits", description, 0, amount, "booking-deposit"));
     if (ticket.depositStatus === "Refunded") {
@@ -2802,7 +2806,7 @@ function journalEntries() {
   expenses.forEach((expense) => {
     if (expense.status === "Reversed") return;
     const amount = Number(expense.amount) || 0;
-    const date = expense.createdAt || "";
+    const date = expense.date || expense.createdAt || "";
     const description = `${expense.category || "Expense"} · ${expense.note || ""}`.trim();
     entries.push(journalLine(date, "6100 Shop operating expenses", description, amount, 0, "expense"));
     entries.push(journalLine(date, paymentAccount(expense.payment), description, 0, amount, "expense"));
@@ -4788,6 +4792,7 @@ function renderSaleServices() {
 
 function syncInventoryTracking() {
   document.getElementById("inventoryTrackingEnabled").checked = inventoryTrackingEnabled;
+  document.getElementById("purchaseTrackStock").checked = inventoryTrackingEnabled;
   document.querySelector(".recipe-builder").hidden = !inventoryTrackingEnabled;
 }
 
@@ -4996,7 +5001,7 @@ function renderPurchaseTable() {
     const row = document.createElement("tr");
     row.innerHTML = `
       <td data-label="Supplier"><strong>${escapeHtml(purchase.supplier)}</strong></td>
-      <td data-label="Item">${escapeHtml(translate(purchase.item))}<br><small>${escapeHtml(purchase.qty)} ${escapeHtml(translate(purchase.unit))} × ${moneyFixed(purchase.unitCost)}</small></td>
+      <td data-label="Item">${escapeHtml(translate(purchase.item))}<br><small>${escapeHtml(purchase.qty)} ${escapeHtml(translate(purchase.unit))} × ${moneyFixed(purchase.unitCost)}${purchase.trackStock === false ? " · no stock movement" : ""}</small></td>
       <td data-label="Invoice / due">${escapeHtml(purchase.invoiceNumber || "No reference")}<br><small>${escapeHtml(purchase.invoiceDate || "-")} · due ${escapeHtml(purchase.dueDate || "-")}</small>${purchase.evidenceFile ? `<br><small>${evidenceMarkup(purchase)}</small>` : ""}</td>
       <td data-label="Paid / balance">${moneyFixed(purchasePaidAmount(purchase))}<br><small>${reversed ? "Reversed" : `${moneyFixed(balance)} due`}</small></td>
       <td data-label="Total">${moneyFixed(purchaseTotal(purchase))}</td>
@@ -5055,7 +5060,7 @@ function renderPurchaseTable() {
       renderInventory();
       syncSummaryTotals();
       document.getElementById("purchaseReversalReason").value = "";
-      document.getElementById("purchaseNote").textContent = "Purchase reversed. Stock, payable and accounting were recalculated.";
+      document.getElementById("purchaseNote").textContent = "Purchase reversed. Supplier balance and accounting were recalculated.";
       applyTranslations();
     });
   });
@@ -5288,7 +5293,7 @@ function renderStaffModule() {
   payrollBody.innerHTML = visiblePayroll.length ? [...visiblePayroll].sort((a, b) => b.period.localeCompare(a.period)).map((run) => {
     const profile = staffProfiles.find((candidate) => candidate.id === run.staffId);
     const adjustment = Number(run.additions || 0) - Number(run.deductions || 0);
-    const wpsLabel = (run.status === "Paid" && run.wpsStatus === "Completed" ? "WPS complete" : run.status === "Paid" ? "Paid · WPS pending" : run.status)
+    const wpsLabel = (run.status === "Paid" && !run.wpsRequired ? "Paid" : run.status === "Paid" && run.wpsStatus === "Completed" ? "WPS complete" : run.status === "Paid" ? "Paid · WPS pending" : run.status)
       + (run.evidenceName || run.evidenceFile?.name ? " · proof attached" : "");
     const canPay = run.status !== "Paid" && ["Platform Admin", "Owner", "Shop Admin"].includes(currentRole);
     return `<tr><td>${escapeHtml(run.period)}</td><td>${escapeHtml(profile?.name || "Staff")}</td><td>${moneyFixed(run.basePay)}</td><td>${moneyFixed(run.commission)}</td><td>${moneyFixed(adjustment)}</td><td><strong>${moneyFixed(run.netPay)}</strong></td><td><b class="${run.status === "Paid" ? "ok" : "warn"}">${escapeHtml(wpsLabel)}</b></td><td>${canPay ? `<button class="primary-button" data-pay-payroll="${escapeHtml(run.id)}" type="button">Pay</button>` : "-"}</td></tr>`;
@@ -5337,7 +5342,7 @@ function renderStaffModule() {
     renderCompliance();
     document.getElementById("payrollPaymentReference").value = "";
     document.getElementById("payrollEvidenceFile").value = "";
-    document.getElementById("payrollNote").textContent = run.wpsStatus === "Completed" ? "Payroll paid with completed evidence." : "Payment saved; WPS evidence remains pending.";
+    document.getElementById("payrollNote").textContent = !run.wpsRequired ? "Payroll payment saved." : run.wpsStatus === "Completed" ? "Payroll paid with completed evidence." : "Payment saved; WPS evidence remains pending.";
   }));
 }
 
@@ -5350,6 +5355,7 @@ function renderCustomerSelects() {
     select.innerHTML = customerOptions;
     if ([...select.options].some((option) => option.value === currentValue)) select.value = currentValue;
   });
+  document.getElementById("bookingGuestFields").hidden = document.getElementById("bookingCustomer").value !== "walk-in-guest";
   const serviceSelect = document.getElementById("bookingService");
   if (serviceSelect) {
     const currentValue = serviceSelect.value;
@@ -5370,6 +5376,7 @@ function renderBookingDepositOptions(preferredTicketId = "") {
   const customerId = document.getElementById("saleCustomer")?.value;
   const current = preferredTicketId || select.value;
   const eligible = queueTickets.filter((ticket) => ticket.customerId === customerId
+    && (customerId !== "walk-in-guest" || (preferredTicketId && ticket.id === preferredTicketId))
     && Number(ticket.deposit || 0) > 0
     && !["Redeemed", "Refunded", "Refunded with sale", "Forfeited"].includes(ticket.depositStatus)
     && ["Booked", "Waiting", "In chair"].includes(ticket.status));
@@ -5463,7 +5470,7 @@ function prepareTicketCheckout(ticket) {
   renderSaleServices();
   syncSelectedServiceLabel();
   showView("quick-sale");
-  document.getElementById("saleNote").textContent = `${customerById(ticket.customerId).name}'s ${moneyFixed(ticket.deposit)} booking deposit is ready to apply.`;
+  document.getElementById("saleNote").textContent = `${ticket.customerName || customerById(ticket.customerId).name}'s ${moneyFixed(ticket.deposit)} booking deposit is ready to apply.`;
 }
 
 async function cancelTicket(ticket) {
@@ -5491,7 +5498,7 @@ function renderQueueTable() {
   queueTickets
     .filter((ticket) => ticket.status !== "Archived")
     .forEach((ticket) => {
-      const customer = customerById(ticket.customerId);
+      const customer = { ...customerById(ticket.customerId), name: ticket.customerName || customerById(ticket.customerId).name };
       const row = document.createElement("tr");
       row.innerHTML = `
         <td><strong>${escapeHtml(customer.name)}</strong><br><small>${escapeHtml(ticket.type)}${ticket.deposit ? ` · ${moneyFixed(ticket.deposit)} deposit` : ""}</small></td>
@@ -5599,18 +5606,23 @@ async function saveBookingFromForm() {
   const date = document.getElementById("bookingDate").value || todayIso();
   const time = document.getElementById("bookingTime").value || new Intl.DateTimeFormat("en-AE", { hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date());
   const deposit = numberValue("bookingDeposit");
-  const customer = customerById(customerId);
+  const guest = customerId === "walk-in-guest";
+  const guestName = document.getElementById("bookingGuestName").value.trim();
+  const guestPhone = document.getElementById("bookingGuestPhone").value.trim();
+  const customer = guest ? { name: guestName } : customerById(customerId);
   const selectedBookingService = services.find((candidate) => candidate.name === service && candidate.active !== false);
   const servicePrice = Number(selectedBookingService?.price || 0);
-  if (!customerId || !selectedBookingService || deposit < 0 || (type !== "Appointment" && deposit > 0) || deposit > servicePrice) {
+  if (!customerId || (guest && (!guestName || guestName.length > 160 || guestPhone.length > 40)) || !selectedBookingService || deposit < 0 || (type !== "Appointment" && deposit > 0) || deposit > servicePrice) {
     document.getElementById("bookingNote").textContent = type !== "Appointment" && deposit > 0
       ? "Deposits can only be collected for appointments."
-      : `Select a customer and service, and keep the deposit between ${moneyFixed(0)} and ${moneyFixed(servicePrice)}.`;
+      : `Enter a guest name or select a saved customer and service. Keep the deposit between ${moneyFixed(0)} and ${moneyFixed(servicePrice)}.`;
     return;
   }
   const ticket = {
     id: `q-${crypto.randomUUID()}`,
     customerId,
+    customerName: guest ? guestName : customer.name,
+    customerPhone: guest ? guestPhone : "",
     serviceId: selectedBookingService.id,
     service,
     staff,
@@ -5640,6 +5652,10 @@ async function saveBookingFromForm() {
   queueTickets.push(ticket);
   if (type === "Appointment") appointments.push({ ...ticket });
   document.getElementById("bookingNote").textContent = `${customer.name} added as ${type.toLowerCase()} for ${service}.`;
+  if (guest) {
+    document.getElementById("bookingGuestName").value = "";
+    document.getElementById("bookingGuestPhone").value = "";
+  }
   addAudit("Booking created", `${currentRole} · ${type.toLowerCase()} added · ${customer.name} · ${service}`);
   saveState();
   syncSummaryTotals();
@@ -5667,7 +5683,7 @@ async function updateQueueStatus(ticketId, status, reason = "") {
       ticket.cancellationReason = reason;
     }
   }
-  const customer = customerById(ticket.customerId);
+  const customer = { ...customerById(ticket.customerId), name: ticket.customerName || customerById(ticket.customerId).name };
   if (status === "Completed") {
     customer.visits = Number(customer.visits || 0) + 1;
     customer.lastVisit = todayIso();
@@ -5693,6 +5709,7 @@ function renderExpenseTable() {
     const reversed = expense.status === "Reversed";
     const row = document.createElement("tr");
     row.innerHTML = `
+      <td>${escapeHtml(expense.date || (expense.createdAt || "").slice(0, 10))}</td>
       <td>${translate(expense.category)}</td>
       <td>${escapeHtml(translate(expense.note || "-"))}${expense.evidenceFile ? `<br><small>${evidenceMarkup(expense)}</small>` : ""}</td>
       <td>${translate(expense.payment)}</td>
@@ -5702,7 +5719,7 @@ function renderExpenseTable() {
     `;
     body.appendChild(row);
   });
-  if (!expenses.length) body.innerHTML = '<tr><td colspan="6">No expenses yet.</td></tr>';
+  if (!expenses.length) body.innerHTML = '<tr><td colspan="7">No expenses yet.</td></tr>';
 
   body.querySelectorAll("[data-reverse-expense]").forEach((button) => {
     button.addEventListener("click", async () => {
@@ -5802,7 +5819,7 @@ document.getElementById("saveSale").addEventListener("click", async () => {
     services: serviceList,
     serviceIds: selected.map((service) => service.id),
     customerId: customer.id,
-    customerName: customer.name,
+    customerName: booking?.customerName || customer.name,
     staff,
     payment,
     paymentLines,
@@ -6098,6 +6115,7 @@ document.getElementById("savePurchase").addEventListener("click", async (event) 
     invoiceDate: document.getElementById("purchaseDate").value || todayIso(),
     dueDate: document.getElementById("purchaseDueDate").value || todayIso(),
     type: document.getElementById("purchaseType").value,
+    trackStock: document.getElementById("purchaseTrackStock").checked,
     item: document.getElementById("purchaseItem").value.trim(),
     qty: Number(document.getElementById("purchaseQty").value || 0),
     unit: document.getElementById("purchaseUnit").value.trim() || "unit",
@@ -6134,9 +6152,9 @@ document.getElementById("savePurchase").addEventListener("click", async (event) 
   }
 
   const typeMap = { "Consumable stock": "consumable", "Retail product": "retail", "Reusable tool / asset": "asset", "Operational supply": "operational" };
-  let stockItem = inventoryItems.find((item) => item.active !== false && item.name.toLowerCase() === purchase.item.toLowerCase() && item.unit.toLowerCase() === purchase.unit.toLowerCase());
-  const stockItemIsNew = !stockItem;
-  if (!stockItem) {
+  let stockItem = purchase.trackStock ? inventoryItems.find((item) => item.active !== false && item.name.toLowerCase() === purchase.item.toLowerCase() && item.unit.toLowerCase() === purchase.unit.toLowerCase()) : null;
+  const stockItemIsNew = purchase.trackStock && !stockItem;
+  if (purchase.trackStock && !stockItem) {
     stockItem = {
       id: `inv-${crypto.randomUUID()}`,
       name: purchase.item,
@@ -6151,13 +6169,13 @@ document.getElementById("savePurchase").addEventListener("click", async (event) 
       active: true
     };
   }
-  purchase.inventoryItemId = stockItem.id;
+  purchase.inventoryItemId = stockItem?.id || "";
   if (!isLocalDemo) {
     saveButton.disabled = true;
     try {
       const result = await window.SalonBackend.recordPurchase(cloudTargetShopId(), purchase, stockItem);
       if (result?.purchase) Object.assign(purchase, result.purchase);
-      if (result?.inventoryItem) Object.assign(stockItem, result.inventoryItem);
+      if (stockItem && result?.inventoryItem) Object.assign(stockItem, result.inventoryItem);
       if (result?.movement && !stockMovements.some((movement) => movement.id === result.movement.id)) stockMovements.unshift(result.movement);
     } catch (error) {
       document.getElementById("purchaseNote").textContent = error.message;
@@ -6168,7 +6186,7 @@ document.getElementById("savePurchase").addEventListener("click", async (event) 
     if (stockItemIsNew) inventoryItems.push(stockItem);
   } else {
     if (stockItemIsNew) inventoryItems.push(stockItem);
-    addStockMovement(stockItem, purchase.qty, "purchase", purchase.id, purchase.supplier, purchaseTotal(purchase) / purchase.qty);
+    if (stockItem) addStockMovement(stockItem, purchase.qty, "purchase", purchase.id, purchase.supplier, purchaseTotal(purchase) / purchase.qty);
   }
   purchases.push(purchase);
   checklist.suppliersAdded = true;
@@ -6311,6 +6329,7 @@ document.getElementById("saveExpense").addEventListener("click", async (event) =
   const expense = {
     id: `expense-${crypto.randomUUID()}`,
     category: document.getElementById("expenseCategory").value,
+    date: document.getElementById("expenseDate").value || todayIso(),
     amount: Number(document.getElementById("expenseAmount").value || 0),
     payment: document.getElementById("expensePayment").value,
     note: document.getElementById("expenseNoteInput").value.trim(),
@@ -6329,7 +6348,7 @@ document.getElementById("saveExpense").addEventListener("click", async (event) =
     if (evidenceFile?.storagePath) {
       await window.SalonBackend.saveDocumentMetadata({
         shop_id: cloudTargetShopId(), title: `${expense.category} · ${expense.note || "Receipt"}`,
-        category: "Expense receipt", issue_date: todayIso(), expiry_date: null,
+        category: "Expense receipt", issue_date: expense.date, expiry_date: null,
         reminder_days: 0, object_path: evidenceFile.storagePath
       });
     }
@@ -6518,6 +6537,7 @@ document.getElementById("saveStaffProfile").addEventListener("click", async () =
   document.getElementById("staffName").value = "";
   document.getElementById("staffEmployeeNo").value = "";
   document.getElementById("staffBaseSalary").value = "0";
+  document.getElementById("staffWpsRequired").value = "no";
   document.getElementById("staffProfileEditId").value = "";
   document.getElementById("staffProfileChangeReason").value = "";
   document.getElementById("staffProfileFormTitle").textContent = "Add Staff Profile";
@@ -7030,6 +7050,7 @@ migratePurchasing();
 removeLegacyDemoRows();
 document.getElementById("closingOpeningCash").value = openingCash.toFixed(currentCountryProfile().decimals);
 document.getElementById("purchaseDate").value = todayIso();
+document.getElementById("expenseDate").value = todayIso();
 document.getElementById("staffJoinDate").value = todayIso();
 document.getElementById("attendanceDate").value = todayIso();
 document.getElementById("payrollMonth").value = new Date().toISOString().slice(0, 7);

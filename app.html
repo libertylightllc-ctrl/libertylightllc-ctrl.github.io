@@ -23,7 +23,7 @@
       rel="stylesheet"
       href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=IBM+Plex+Sans+Devanagari:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap"
     />
-    <link rel="stylesheet" href="./styles.css?v=20260918-release-43" />
+    <link rel="stylesheet" href="./styles.css?v=20260919-release-44" />
   </head>
   <body>
     <noscript>Salon Control needs JavaScript enabled to run the app.</noscript>
@@ -567,10 +567,14 @@
               <div class="panel-head compact">
                 <div>
                   <h3>Add Walk-in / Appointment</h3>
-                  <p>Queue and booking calendar from the same customer list</p>
+                  <p>Saved customers or a one-time guest</p>
                 </div>
               </div>
               <label>Customer <select id="bookingCustomer"></select></label>
+              <div id="bookingGuestFields" hidden>
+                <label>Guest name <input id="bookingGuestName" placeholder="Customer name" /></label>
+                <label>Phone (optional) <input id="bookingGuestPhone" type="tel" placeholder="Contact number" /></label>
+              </div>
               <label>Visit type
                 <select id="bookingType">
                   <option>Walk-in</option>
@@ -733,6 +737,7 @@
               <label>Discount <input id="purchaseDiscount" type="number" min="0" step="0.01" value="0" /></label>
               <label>Amount paid now <input id="purchaseAmountPaid" type="number" min="0" step="0.01" value="0" /></label>
               <label>Payment method <select id="purchasePayment"><option>Cash</option><option>Card</option><option>Bank</option></select></label>
+              <label class="setting-toggle"><input id="purchaseTrackStock" type="checkbox" /> Add quantity to inventory</label>
               <label>Supplier invoice PDF/image <input id="purchaseEvidenceFile" type="file" accept="image/jpeg,image/png,image/webp,.pdf,application/pdf" /></label>
               <div class="calculation-box">
                 <div><span>Qty</span><strong id="calcQty">100 pcs</strong></div><div><span>Unit cost</span><strong id="calcUnitCost">AED 1.20</strong></div>
@@ -740,7 +745,7 @@
                 <div><span>Balance due</span><strong id="calcPurchaseBalance">AED 120.00</strong></div>
               </div>
               <button class="primary-button full" id="savePurchase" type="button">Save Purchase</button>
-              <p class="system-note" id="purchaseNote">The bill posts to stock, cash or bank, and supplier payable.</p>
+              <p class="system-note" id="purchaseNote">Stock tracking is optional. Bills always update payments and supplier balances.</p>
             </article>
           </div>
 
@@ -797,7 +802,7 @@
               <div class="table-wrap">
                 <table>
                   <thead>
-                    <tr><th>Category</th><th>Note</th><th>Payment</th><th>Amount</th><th>Status</th><th>Action</th></tr>
+                    <tr><th>Date</th><th>Category</th><th>Note</th><th>Payment</th><th>Amount</th><th>Status</th><th>Action</th></tr>
                   </thead>
                   <tbody id="expenseTable"></tbody>
                 </table>
@@ -822,6 +827,7 @@
                   <option>Staff Advance</option>
                 </select>
               </label>
+              <label>Date <input id="expenseDate" type="date" /></label>
               <label>Amount <input id="expenseAmount" type="number" min="0" step="0.01" value="35" /></label>
               <label>Payment method
                 <select id="expensePayment">
@@ -929,7 +935,7 @@
               <div class="inline-fields"><label>Employee ID <input id="staffEmployeeNo" placeholder="EMP-001" /></label><label>Job title <input id="staffJobTitle" value="Barber" /></label></div>
               <label>Joining date <input id="staffJoinDate" type="date" /></label>
               <div class="inline-fields"><label>Monthly base salary <input id="staffBaseSalary" type="number" min="0" step="0.01" value="0" /></label><label>Service commission % <input id="staffCommissionRate" type="number" min="0" max="100" step="0.1" value="12" /></label></div>
-              <label>WPS required <select id="staffWpsRequired"><option value="yes">Yes</option><option value="no">No</option></select></label>
+              <label>WPS required <select id="staffWpsRequired"><option value="no">No</option><option value="yes">Yes</option></select></label>
               <label>Change / archive reason <input id="staffProfileChangeReason" placeholder="Required when editing or archiving staff" /></label>
               <button class="primary-button full" id="saveStaffProfile" type="button">Save Staff Profile</button>
               <p class="system-note" id="staffProfileNote">Salary and commission terms are used in payroll calculations.</p>
@@ -1597,7 +1603,7 @@
       </section>
     </div>
 
-    <script src="./backend.js?v=20260918-release-43"></script>
-    <script src="./app.js?v=20260918-release-43"></script>
+    <script src="./backend.js?v=20260919-release-44"></script>
+    <script src="./app.js?v=20260919-release-44"></script>
   </body>
 </html>
