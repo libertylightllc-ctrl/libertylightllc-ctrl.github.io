@@ -5347,7 +5347,7 @@ function renderStaffModule() {
 }
 
 function renderCustomerSelects() {
-  const customerOptions = customers.map((customer) => `<option value="${escapeHtml(customer.id)}">${escapeHtml(customer.name)}${customer.phone ? ` · ${escapeHtml(customer.phone)}` : ""}</option>`).join("");
+  const customerOptions = customers.map((customer) => `<option value="${escapeHtml(customer.id)}">${escapeHtml(customer.id === "walk-in-guest" ? "One-time guest (no registration)" : customer.name)}${customer.phone ? ` · ${escapeHtml(customer.phone)}` : ""}</option>`).join("");
   ["saleCustomer", "bookingCustomer"].forEach((id) => {
     const select = document.getElementById(id);
     if (!select) return;
